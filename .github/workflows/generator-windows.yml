@@ -800,30 +800,131 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-      - name: send exe to rdgen server
+      - name: upload artifacts to rdgen (COS/OSS or direct)
         if: ${{ env.rdgen == 'true' }}
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 10
+          timeout_minutes: 35
           max_attempts: 3
           shell: bash
           command: |
             set -euo pipefail
-            test -s "./SignOutput/${{ env.filename }}.exe"
-            test -s "./SignOutput/${{ env.filename }}.msi"
-            curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.exe" -F "uuid=${{ env.uuid }}" -F "defer_completion=true" ${{ secrets.GENURL }}/save_custom_client
+            EXE="./SignOutput/${{ env.filename }}.exe"
+            MSI="./SignOutput/${{ env.filename }}.msi"
+            test -s "$EXE"
+            test -s "$MSI"
+            python - <<'PY'
+            import hashlib
+            import json
+            import os
+            import subprocess
+            import sys
+            import urllib.error
+            import urllib.request
 
-      - name: send msi to rdgen server
-        if: ${{ env.rdgen == 'true' }}
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          shell: bash
-          command: |
-            set -euo pipefail
-            test -s "./SignOutput/${{ env.filename }}.msi"
-            curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.msi" -F "uuid=${{ env.uuid }}" -F "defer_completion=true" ${{ secrets.GENURL }}/save_custom_client
+            genurl = os.environ["GENURL"].rstrip("/")
+            token = os.environ["TOKEN"]
+            run_uuid = os.environ["UUID"]
+            filename = os.environ["FILENAME"]
+            exe = os.path.join("SignOutput", f"{filename}.exe")
+            msi = os.path.join("SignOutput", f"{filename}.msi")
+            files = [exe, msi]
+
+            def req(method, url, data=None, headers=None, timeout=120):
+                body = None if data is None else (data if isinstance(data, (bytes, bytearray)) else json.dumps(data).encode())
+                h = {"Authorization": f"Bearer {token}", "User-Agent": "rdgen-actions"}
+                if headers:
+                    h.update(headers)
+                if body is not None and "Content-Type" not in h:
+                    h["Content-Type"] = "application/json"
+                request = urllib.request.Request(url, data=body, headers=h, method=method)
+                with urllib.request.urlopen(request, timeout=timeout) as resp:
+                    raw = resp.read()
+                    ctype = resp.headers.get("Content-Type", "")
+                    if "json" in ctype or (raw[:1] in (b"{", b"[")):
+                        return json.loads(raw.decode() or "{}")
+                    return {"raw": raw.decode(errors="replace")}
+
+            def sha256_file(path):
+                digest = hashlib.sha256()
+                with open(path, "rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                return digest.hexdigest()
+
+            prepare = req(
+                "POST",
+                f"{genurl}/prepare_artifact_upload",
+                {"uuid": run_uuid, "files": [os.path.basename(p) for p in files]},
+                timeout=60,
+            )
+            mode = prepare.get("mode") or "direct"
+            print("upload_mode", mode, "provider", prepare.get("provider"))
+
+            if mode == "object_storage":
+                uploads = {item["filename"]: item for item in prepare.get("uploads") or []}
+                artifacts = []
+                for path in files:
+                    name = os.path.basename(path)
+                    item = uploads.get(name)
+                    if not item or not item.get("put_url"):
+                        raise SystemExit(f"missing put_url for {name}")
+                    size = os.path.getsize(path)
+                    digest = sha256_file(path)
+                    put_headers = {"User-Agent": "rdgen-actions"}
+                    put_headers.update(item.get("headers") or {})
+                    # Prefer curl for large PUT reliability on Windows runners.
+                    cmd = [
+                        "curl", "--fail", "--show-error", "--connect-timeout", "30",
+                        "--max-time", "1200", "-X", "PUT",
+                        "--upload-file", path,
+                        item["put_url"],
+                    ]
+                    for key, value in put_headers.items():
+                        cmd.extend(["-H", f"{key}: {value}"])
+                    print("putting", name, "bytes", size)
+                    subprocess.check_call(cmd)
+                    artifacts.append(
+                        {
+                            "filename": name,
+                            "object_key": item["object_key"],
+                            "size": size,
+                            "sha256": digest,
+                        }
+                    )
+                complete = req(
+                    "POST",
+                    f"{genurl}/complete_artifact_upload",
+                    {
+                        "uuid": run_uuid,
+                        "defer_completion": True,
+                        "artifacts": artifacts,
+                    },
+                    timeout=1200,
+                )
+                print("complete", complete)
+            else:
+                for path in files:
+                    name = os.path.basename(path)
+                    cmd = [
+                        "curl", "--fail", "--show-error", "--connect-timeout", "30",
+                        "--max-time", "900", "--retry", "2", "--retry-delay", "15",
+                        "-X", "POST",
+                        "-H", f"Authorization: Bearer {token}",
+                        "-F", f"file=@{path}",
+                        "-F", f"uuid={run_uuid}",
+                        "-F", "defer_completion=true",
+                        f"{genurl}/save_custom_client",
+                    ]
+                    print("direct_upload", name)
+                    subprocess.check_call(cmd)
+            print("upload_ok")
+            PY
+        env:
+          GENURL: ${{ secrets.GENURL }}
+          TOKEN: ${{ env.token }}
+          UUID: ${{ env.uuid }}
+          FILENAME: ${{ env.filename }}
 
       - name: finalize files on rdgen server
         if: ${{ env.rdgen == 'true' }}
