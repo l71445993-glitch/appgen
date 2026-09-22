@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="pageTitle">正在生成客户端</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet">
+    {% include "includes/local_icons.html" %}
+    <style>
+        :root {
+            --page: #f5f9ff;
+            --surface: #ffffff;
+            --line: #d8e7fb;
+            --text: #10223d;
+            --muted: #5e7190;
+            --blue: #1769e0;
+            --blue-strong: #0b4fb8;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            text-align: center;
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(245, 249, 255, 0.96)),
+                linear-gradient(90deg, rgba(23, 105, 224, 0.08) 1px, transparent 1px),
+                linear-gradient(0deg, rgba(23, 105, 224, 0.08) 1px, transparent 1px);
+            background-size: auto, 42px 42px, 42px 42px;
+            color: var(--text);
+        }
+        .platform-logo {
+            width: 150px;
+            height: 150px;
+            margin-bottom: 30px;
+            display: none;
+            filter: drop-shadow(0 10px 15px rgba(0,0,0,0.2));
+            transition: transform 0.3s ease;
+        }
+        .platform-logo:hover {
+            transform: scale(1.1);
+        }
+        .loading-text {
+            color: var(--text);
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+        .status-text {
+            color: var(--muted);
+            font-size: 0.9em;
+        }
+        .macos-note {
+            color: var(--muted);
+            font-size: 0.9em;
+            margin-top: 15px;
+            background: rgba(255,255,255,0.85);
+            border: 1px solid var(--line);
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--blue);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .progress-bar {
+            width: 300px;
+            height: 10px;
+            background-color: #e0e0e0;
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 20px auto;
+        }
+        .progress-bar-fill {
+            width: 0%;
+            height: 100%;
+            background-color: var(--blue);
+            transition: width 0.5s ease-in-out;
+        }
+        .log-container {
+            margin-top: 30px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.88);
+            border-radius: 8px;
+            font-size: 0.85em;
+            max-width: 320px;
+            margin-left: auto;
+            margin-right: auto;
+            border: 1px solid var(--line);
+        }
+        .log-link {
+            color: var(--blue-strong);
+            text-decoration: none;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .log-link:hover {
+            text-decoration: underline;
+        }
+        .delivery-summary { display: grid; gap: 8px; max-width: 360px; margin: 18px auto 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.88); text-align: left; }
+        .delivery-summary__title { display: flex; align-items: center; gap: 7px; color: var(--text); font-size: 12px; font-weight: 800; }
+        .delivery-summary__title i { color: var(--blue); }
+        .delivery-summary__copy { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    </style>
+</head>
+<body>
+    <svg id="windowsLogo" class="platform-logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <linearGradient id="windowsGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#00A4EF;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#0078D7;stop-opacity:1" />
+            </linearGradient>
+        </defs>
+        <rect width="256" height="256" rx="50" ry="50" fill="url(#windowsGradient)"/>
+        <path d="M60 60 L196 60 L196 196 L60 196 Z" fill="white" opacity="0.2"/>
+        <path d="M128 60 L196 60 L196 128 Z" fill="white" opacity="0.1"/>
+        <text x="128" y="200" font-family="Arial" font-size="50" font-weight="bold" text-anchor="middle" fill="white">Win</text>
+    </svg>
+
+    <svg id="macosLogo" class="platform-logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <linearGradient id="macosGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#A2AAAD;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#4A4A4A;stop-opacity:1" />
+            </linearGradient>
+            <filter id="macosGlow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur class="blur" result="coloredBlur" stdDeviation="4"></feGaussianBlur>
+                <feMerge>
+                    <feMergeNode in="coloredBlur"></feMergeNode>
+                    <feMergeNode in="SourceGraphic"></feMergeNode>
+                </feMerge>
+            </filter>
+        </defs>
+        <rect width="256" height="256" rx="50" ry="50" fill="url(#macosGradient)" filter="url(#macosGlow)"/>
+        <path d="M128 80 C100 120, 156 140, 128 200" fill="none" stroke="white" stroke-width="10" opacity="0.3"/>
+        <text x="128" y="200" font-family="Arial" font-size="50" font-weight="bold" text-anchor="middle" fill="white">Mac</text>
+    </svg>
+
+    <svg id="linuxLogo" class="platform-logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <linearGradient id="linuxGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#FFA500;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#FF4500;stop-opacity:1" />
+            </linearGradient>
+        </defs>
+        <rect width="256" height="256" rx="50" ry="50" fill="url(#linuxGradient)"/>
+        <path d="M128 80 C100 120, 156 140, 128 200" fill="none" stroke="white" stroke-width="10" opacity="0.3"/>
+        <text x="128" y="200" font-family="Arial" font-size="50" font-weight="bold" text-anchor="middle" fill="white">Linux</text>
+    </svg>
+
+    <svg id="androidLogo" class="platform-logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <linearGradient id="androidGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#A4C639;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#78C257;stop-opacity:1" />
+            </linearGradient>
+        </defs>
+        <rect width="256" height="256" rx="50" ry="50" fill="url(#androidGradient)"/>
+        <path d="M128 80 
+                 C100 100, 156 100, 128 130 
+                 Q110 160, 128 190 
+                 Q146 160, 128 130 Z" 
+              fill="white" opacity="0.3"/>
+        <path d="M90 100 L70 140" stroke="white" stroke-width="10" stroke-linecap="round"/>
+        <path d="M166 100 L186 140" stroke="white" stroke-width="10" stroke-linecap="round"/>
+        <text x="128" y="200" font-family="Arial" font-size="50" font-weight="bold" text-anchor="middle" fill="white">Android</text>
+    </svg>
+
+    <div>
+        <h2 class="loading-text">正在生成客户端</h2>
+        <div class="loading-spinner"></div>
+        <div class="progress-bar">
+            <div id="progressBarFill" class="progress-bar-fill"></div>
+        </div>
+        <p class="status-text">生成通常需要 30-45 分钟。你可以保持页面打开，也可以稍后回来。</p>
+        <p class="status-text">状态：<span id="statusText">{{status}}</span></p>
+
+        <div class="log-container">
+            <p style="margin: 0 0 8px 0; color: #5e7190;">构建日志</p>
+            <a href="{{ log_url }}" target="_blank" class="log-link">
+                查看 GitHub Actions 日志
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+            </a>
+        </div>
+        <div class="delivery-summary">
+            <div class="delivery-summary__title"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> 下载交付设置</div>
+            <p class="delivery-summary__copy">{% if download_access == 'public' %}无需登录即可下载{% else %}登录后下载（生成者和管理员）{% endif %} · 首个安装包上传后保存 {% if download_ttl_hours == 1 %}1 小时{% elif download_ttl_hours == 24 %}1 天{% elif download_ttl_hours == 72 %}3 天{% else %}7 天{% endif %}，服务器文件最长保留 7 天。</p>
+        </div>
+    </div>
+
+    <div id="macosNote" class="macos-note">
+        macOS 提示：生成可执行文件可能需要额外步骤或权限。
+    </div>
+
+    <script>
+        // Detect platform and update logo, title, and notes
+        function updatePlatformUI() {
+            const platform = '{{platform}}'.toLowerCase();
+            const platformLogos = {
+                'windows': document.getElementById('windowsLogo'),
+                'windows-x86': document.getElementById('windowsLogo'),
+                'macos': document.getElementById('macosLogo'),
+                'linux': document.getElementById('linuxLogo'),
+                'android': document.getElementById('androidLogo')
+            };
+
+            // Reset all logos
+            Object.values(platformLogos).forEach(logo => logo.style.display = 'none');
+
+            // Set appropriate logo and title
+            if (platform === 'macos') {
+                document.getElementById('pageTitle').textContent = '正在生成 macOS 客户端';
+                platformLogos.macos.style.display = 'block';
+                document.getElementById('macosNote').style.display = 'block';
+            } else if (platform === 'windows' || platform === 'windows-x86') {
+                document.getElementById('pageTitle').textContent = '正在生成 Windows 客户端';
+                platformLogos.windows.style.display = 'block';
+            } else if (platform === 'linux') {
+                document.getElementById('pageTitle').textContent = '正在生成 Linux 客户端';
+                platformLogos.linux.style.display = 'block';
+            } else if (platform === 'android') {
+                document.getElementById('pageTitle').textContent = '正在生成 Android 客户端';
+                platformLogos.android.style.display = 'block';
+            }
+        }
+
+        // Simulate progress (replace with actual progress tracking if possible)
+        function simulateProgress() {
+            const progressBar = document.getElementById('progressBarFill');
+            const statusText = document.getElementById('statusText');
+            let progress = 0;
+            const stages = [
+                '初始化构建流程',
+                '编译客户端',
+                '生成平台文件',
+                '打包应用',
+                '完成构建'
+            ];
+
+            const progressInterval = setInterval(() => {
+                progress += Math.random() * 20;
+                progressBar.style.width = `${Math.min(progress, 100)}%`;
+                
+                const stageIndex = Math.floor(progress / 20);
+                statusText.textContent = stages[Math.min(stageIndex, stages.length - 1)];
+
+                if (progress >= 100) {
+                    clearInterval(progressInterval);
+                }
+            }, 1000);
+        }
+
+        // Call on page load
+        updatePlatformUI();
+        //simulateProgress();
+
+        setTimeout(function() {
+            window.location.replace('/check_for_file?filename={{filename}}&uuid={{uuid}}&platform={{platform}}');
+        }, 30000); // 20000 milliseconds = 20 seconds
+    </script>
+</body>
+</html>

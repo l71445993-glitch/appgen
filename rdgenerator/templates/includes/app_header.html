@@ -1,0 +1,71 @@
+<header class="app-header">
+    <div class="app-header__inner">
+        <a class="app-brand" href="/" aria-label="RustDesk 生成器首页">
+            <span class="brand-mark" aria-hidden="true">RD</span>
+            <span class="brand-copy"><span>RustDesk</span><small>生成器控制台</small></span>
+        </a>
+        <nav class="app-nav" aria-label="主导航">
+            <span class="nav-label">工作区</span>
+            <a href="/"{% if request.path == '/' or request.path == '/generator' %} aria-current="page"{% endif %}>
+                <span class="rd-generated-icon rd-generated-icon--client" aria-hidden="true"></span><span>客户端生成</span>
+            </a>
+            <a href="{% url 'users:build_records' %}"{% if request.path|slice:':15' == '/build-records/' %} aria-current="page"{% endif %}>
+                <i class="fa-solid fa-clock" aria-hidden="true"></i><span>构建记录</span>
+            </a>
+            {% if request.user.is_staff %}
+                <a href="{% url 'users:list' %}"{% if request.path|slice:':7' == '/users/' %} aria-current="page"{% endif %}>
+                    <span class="rd-generated-icon rd-generated-icon--users" aria-hidden="true"></span><span>用户管理</span>
+                </a>
+                <a href="{% url 'users:activation_codes' %}"{% if request.path|slice:':18' == '/activation-codes/' %} aria-current="page"{% endif %}>
+                    <i class="fa-solid fa-key" aria-hidden="true"></i><span>激活码管理</span>
+                </a>
+            {% endif %}
+        </nav>
+        {% if entitlement_summary %}
+            <section class="entitlement-panel entitlement-panel--{{ entitlement_summary.mode }} entitlement-panel--{{ entitlement_summary.status }}" aria-label="当前生成权益">
+                <div class="entitlement-panel__header">
+                    <span class="entitlement-panel__identity">
+                        <i class="fa-solid {% if entitlement_summary.mode == 'count' %}fa-layer-group{% elif entitlement_summary.status == 'permanent' %}fa-infinity{% else %}fa-calendar-check{% endif %}" aria-hidden="true"></i>
+                        <strong>{{ entitlement_summary.plan_label }}</strong>
+                    </span>
+                    <span class="entitlement-status">{{ entitlement_summary.status_label }}</span>
+                </div>
+                {% if entitlement_summary.mode == 'count' %}
+                    <dl class="entitlement-metrics">
+                        <div><dt>总次数</dt><dd>{% if entitlement_summary.generation_limit_configured %}{{ entitlement_summary.generation_limit }}{% else %}--{% endif %}</dd></div>
+                        <div><dt>已使用</dt><dd>{{ entitlement_summary.generations_used }}</dd></div>
+                        <div><dt>构建中</dt><dd>{{ entitlement_summary.reserved_generations }}</dd></div>
+                        <div class="entitlement-metrics__remaining"><dt>剩余次数</dt><dd>{% if entitlement_summary.generation_limit_configured %}{{ entitlement_summary.remaining_generations }}{% else %}--{% endif %}</dd></div>
+                    </dl>
+                {% else %}
+                    <div class="entitlement-validity">
+                        <strong>{{ entitlement_summary.remaining_label }}</strong>
+                        {% if entitlement_summary.expires_at_display %}
+                            <span>{% if entitlement_summary.status == 'expired' %}原到期时间{% else %}北京时间到期{% endif %} <time datetime="{{ entitlement_summary.expires_at|date:'c' }}">{{ entitlement_summary.expires_at_display }}</time></span>
+                        {% else %}
+                            <span>无需续期</span>
+                        {% endif %}
+                    </div>
+                {% endif %}
+                <form class="activation-form" method="post" action="{% url 'users:activate' %}">
+                    {% csrf_token %}
+                    <label for="membershipActivationCode">激活会员 / 续期</label>
+                    <div class="activation-form__row">
+                        <input id="membershipActivationCode" name="code" type="text" maxlength="64" required autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="填写激活码">
+                        <button type="submit">激活</button>
+                    </div>
+                    <span>激活码仅可使用一次，时长卡支持续期叠加。</span>
+                </form>
+            </section>
+        {% endif %}
+        <div class="app-account">
+            <span class="account-avatar" aria-hidden="true">{{ request.user.username|first|upper }}</span>
+            <span class="account-copy"><span class="app-username">{{ request.user.username }}</span><span class="account-role">{% if request.user.is_superuser %}超级管理员{% elif request.user.is_staff %}管理员{% else %}成员{% endif %}</span></span>
+            <a class="account-action" href="{% url 'users:password_change' %}" title="修改密码" aria-label="修改密码"><i class="fa-solid fa-key" aria-hidden="true"></i></a>
+            <form class="inline-form" method="post" action="{% url 'users:logout' %}">
+                {% csrf_token %}
+                <button class="logout-button" type="submit" title="退出登录" aria-label="退出登录"><i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i></button>
+            </form>
+        </div>
+    </div>
+</header>

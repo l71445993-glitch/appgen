@@ -1,0 +1,168 @@
+{% extends "base_account.html" %}
+
+{% block title %}构建记录 | RustDesk 生成器{% endblock %}
+
+{% block extra_head %}
+<style>
+    .build-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .build-summary__item { padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); box-shadow: 0 8px 22px rgba(25,43,76,.05); }
+    .build-summary__item span { display: block; color: var(--muted); font-size: 11px; font-weight: 700; }
+    .build-summary__item strong { display: block; margin-top: 4px; color: var(--ink); font-family: 'DM Mono', monospace; font-size: 24px; line-height: 1.2; }
+    .build-summary__item--success strong { color: var(--success); }
+    .build-summary__item--active strong { color: var(--accent-deep); }
+    .build-summary__item--failed strong { color: var(--danger); }
+    .build-filters { display: grid; grid-template-columns: minmax(190px, 1.4fr) repeat(4, minmax(125px, .72fr)) auto auto; gap: 9px; margin-bottom: 12px; }
+    .build-filters--member { grid-template-columns: minmax(190px, 1.4fr) repeat(3, minmax(125px, .72fr)) auto auto; }
+    .build-filters input, .build-filters select { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--ink); }
+    .build-records__meta { display: flex; justify-content: space-between; gap: 16px; margin: 0 0 10px; color: var(--muted); font-size: 11px; }
+    .build-name { display: block; max-width: 230px; overflow: hidden; color: var(--ink); font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+    .build-id { display: block; max-width: 230px; margin-top: 3px; overflow: hidden; color: var(--muted); font-family: 'DM Mono', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .build-owner { display: flex; align-items: center; gap: 9px; }
+    .build-owner__avatar { display: grid; width: 30px; height: 30px; place-items: center; flex: 0 0 auto; border-radius: 8px; background: var(--accent-soft); color: var(--accent-deep); font-size: 11px; font-weight: 800; }
+    .build-owner strong { display: block; color: var(--ink); font-size: 12px; }
+    .build-owner small, .build-delivery small { display: block; color: var(--muted); font-size: 10px; }
+    .build-platform { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-soft); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .build-relay-mode { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .build-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+    .build-status::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ''; }
+    .build-status--success { background: var(--success-soft); color: var(--success); }
+    .build-status--pending { background: var(--accent-soft); color: var(--accent-deep); }
+    .build-status--warning { background: var(--warning-soft); color: var(--warning); }
+    .build-status--danger { background: var(--danger-soft); color: var(--danger); }
+    .build-delivery strong { display: block; color: var(--ink-soft); font-size: 12px; }
+    .build-delivery--expired strong { color: var(--danger); }
+    .build-actions { display: flex; align-items: center; gap: 6px; }
+    .pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 16px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 1120px) {
+        .build-filters, .build-filters--member { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .build-filters input { grid-column: span 2; }
+    }
+    @media (max-width: 700px) {
+        .build-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .build-filters, .build-filters--member { grid-template-columns: 1fr 1fr; }
+        .build-filters input { grid-column: 1 / -1; }
+        .build-records__meta { align-items: flex-start; flex-direction: column; }
+    }
+    @media (max-width: 560px) {
+        .build-filters, .build-filters--member { grid-template-columns: 1fr; }
+        .build-filters input { grid-column: auto; }
+        .build-name, .build-id { max-width: none; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-heading">
+    <div class="page-heading__copy">
+        <span class="eyebrow">BUILD HISTORY</span>
+        <h1>构建记录</h1>
+        <p class="page-heading__subtitle">{% if request.user.is_staff %}查看所有账号提交的客户端构建及交付状态。{% else %}查看你提交的客户端构建及交付状态。{% endif %}</p>
+    </div>
+</div>
+
+<section class="build-summary" aria-label="构建概况">
+    <div class="build-summary__item"><span>全部记录</span><strong>{{ summary.total }}</strong></div>
+    <div class="build-summary__item build-summary__item--success"><span>构建成功</span><strong>{{ summary.success }}</strong></div>
+    <div class="build-summary__item build-summary__item--active"><span>进行中</span><strong>{{ summary.active }}</strong></div>
+    <div class="build-summary__item build-summary__item--failed"><span>未成功</span><strong>{{ summary.failed }}</strong></div>
+</section>
+
+<section class="build-records" aria-labelledby="build-records-title">
+    <form class="build-filters{% if not request.user.is_staff %} build-filters--member{% endif %}" method="get">
+        <input name="q" type="search" maxlength="100" value="{{ query }}" placeholder="搜索名称、UUID{% if request.user.is_staff %}或用户名{% endif %}" aria-label="搜索构建记录">
+        {% if request.user.is_staff %}
+        <select name="owner" aria-label="按用户筛选">
+            <option value="">全部用户</option>
+            {% for filter_user in filter_users %}<option value="{{ filter_user.pk }}"{% if selected_owner == filter_user.pk|stringformat:'s' %} selected{% endif %}>{{ filter_user.username }}</option>{% endfor %}
+            <option value="deleted"{% if selected_owner == 'deleted' %} selected{% endif %}>账号已删除</option>
+        </select>
+        {% endif %}
+        <select name="status" aria-label="按状态筛选">
+            <option value="">全部状态</option>
+            {% for value, label in status_choices %}<option value="{{ value }}"{% if selected_status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <select name="platform" aria-label="按平台筛选">
+            <option value="">全部平台</option>
+            {% for value, label in platform_choices %}<option value="{{ value }}"{% if selected_platform == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <select name="period" aria-label="按时间筛选">
+            <option value="">全部时间</option>
+            {% for value, label, days in period_choices %}<option value="{{ value }}"{% if selected_period == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <button class="button button--small" type="submit">筛选</button>
+        <a class="button button--secondary button--small" href="{% url 'users:build_records' %}">重置</a>
+    </form>
+
+    <div class="build-records__meta">
+        <strong id="build-records-title">记录列表</strong>
+        <span>筛选结果 {{ page_obj.paginator.count }} 条 · 第 {{ page_obj.number }}/{{ page_obj.paginator.num_pages }} 页</span>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <caption>客户端构建历史</caption>
+            <thead>
+                <tr>
+                    <th scope="col">构建</th>
+                    {% if request.user.is_staff %}<th scope="col">用户</th>{% endif %}
+                    <th scope="col">平台</th>
+                    <th scope="col">状态</th>
+                    <th scope="col">提交时间</th>
+                    <th scope="col">交付</th>
+                    <th scope="col">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for build_run in page_obj %}
+                <tr>
+                    <td data-label="构建">
+                        <span class="build-name" title="{{ build_run.artifact_stem|default:'未命名构建' }}">{{ build_run.artifact_stem|default:"未命名构建" }}</span>
+                        <span class="build-id" title="{{ build_run.uuid }}">{{ build_run.uuid }}</span>
+                    </td>
+                    {% if request.user.is_staff %}
+                    <td data-label="用户">
+                        {% if build_run.owner %}
+                        <div class="build-owner"><span class="build-owner__avatar" aria-hidden="true">{{ build_run.owner.username|first|upper }}</span><span><strong>{{ build_run.owner.username }}</strong>{% if build_run.owner.email %}<small>{{ build_run.owner.email }}</small>{% endif %}</span></div>
+                        {% else %}
+                        <span class="user-cell__meta">账号已删除</span>
+                        {% endif %}
+                    </td>
+                    {% endif %}
+                    <td data-label="平台"><span class="build-platform">{{ build_run.platform_label }}</span><span class="build-relay-mode">{% if build_run.smart_multi_relay %}智能多中继{% else %}标准中继{% endif %}</span></td>
+                    <td data-label="状态"><span class="build-status build-status--{{ build_run.status_tone }}">{{ build_run.status_label }}</span>{% if request.user.is_staff and build_run.github_run_id %}<span class="build-id">Run #{{ build_run.github_run_id }}</span>{% endif %}</td>
+                    <td data-label="提交时间">{{ build_run.created_at|date:"Y-m-d H:i" }}</td>
+                    <td data-label="交付">
+                        {% if build_run.artifact_file_count %}
+                        <span class="build-delivery{% if build_run.download_expires_at and build_run.download_expires_at <= now %} build-delivery--expired{% endif %}"><strong>{{ build_run.artifact_file_count }} 个文件</strong>{% if build_run.download_expires_at %}<small>{% if build_run.download_expires_at <= now %}下载已于{% else %}下载有效至{% endif %} {{ build_run.download_expires_at|date:"Y-m-d H:i" }}</small>{% endif %}</span>
+                        {% elif build_run.status == 'success' %}
+                        <span class="user-cell__meta">文件处理中</span>
+                        {% else %}
+                        <span class="user-cell__meta">暂无文件</span>
+                        {% endif %}
+                    </td>
+                    <td data-label="操作">
+                        <div class="build-actions">
+                            {% if build_run.owner == request.user %}
+                            <a class="button button--secondary button--small" href="{% url 'check_for_file' %}?filename={{ build_run.artifact_stem|urlencode }}&amp;uuid={{ build_run.uuid|urlencode }}&amp;platform={{ build_run.platform|urlencode }}">查看结果</a>
+                            {% elif request.user.is_staff %}
+                            <span class="user-cell__meta">只读记录</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="{% if request.user.is_staff %}7{% else %}6{% endif %}"><span class="user-cell__meta">没有符合条件的构建记录。</span></td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if page_obj.has_other_pages %}
+    <nav class="pager" aria-label="构建记录分页">
+        {% if page_obj.has_previous %}<a class="button button--secondary button--small" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">上一页</a>{% endif %}
+        <span>第 {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} 页</span>
+        {% if page_obj.has_next %}<a class="button button--secondary button--small" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">下一页</a>{% endif %}
+    </nav>
+    {% endif %}
+</section>
+{% endblock %}

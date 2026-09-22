@@ -1,0 +1,2239 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 6ad3012fa9659902cc3651709d4980523d26a1a4..06a264586bf9831218e14974550dd6b4810ddd2f 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -9,6 +9,7 @@ edition = "2018"
+ [features]
+ default = []
+ webrtc = ["dep:webrtc"]
++test-ws-tls = []
+
+ [dependencies]
+ # new flexi_logger failed on rustc 1.75
+diff --git a/protos/rendezvous.proto b/protos/rendezvous.proto
+index a2b1d6527b36338641470a667805bbd2e9211de6..e26597aa60680181d2c71da77384072d7c07a0da 100644
+--- a/protos/rendezvous.proto
++++ b/protos/rendezvous.proto
+@@ -4,6 +4,7 @@ package hbb;
+ message RegisterPeer {
+   string id = 1;
+   int32 serial = 2;
++  SmartRelayCapability smart_relay = 1001;
+ }
+
+ enum ConnType {
+@@ -28,6 +29,7 @@ message PunchHoleRequest {
+   bool force_relay = 8;
+   int32 upnp_port = 9;
+   bytes socket_addr_v6 = 10;
++  SmartRelayConnectOffer smart_relay = 1001;
+ }
+
+ message ControlPermissions {
+@@ -63,6 +65,7 @@ message PunchHole {
+   bytes socket_addr_v6 = 7;
+   ControlPermissions control_permissions = 8;
+   ControlledContext controlled_context = 9;
++  SmartRelaySelection smart_relay = 1001;
+ }
+
+ message TestNatRequest {
+@@ -89,6 +92,7 @@ message PunchHoleSent {
+   string version = 5;
+   int32 upnp_port = 6;
+   bytes socket_addr_v6 = 7;
++  SmartRelaySelection smart_relay = 1001;
+ }
+
+ message RegisterPk {
+@@ -97,6 +101,7 @@ message RegisterPk {
+   bytes pk = 3;
+   string old_id = 4;
+   bool no_register_device = 5;
++  SmartRelayCapability smart_relay = 1001;
+ }
+
+ message RegisterPkResponse {
+@@ -134,6 +139,7 @@ message PunchHoleResponse {
+   bool is_udp = 9;
+   int32 upnp_port = 10;
+   bytes socket_addr_v6 = 11;
++  SmartRelaySelection smart_relay = 1001;
+ }
+
+ message ConfigUpdate {
+@@ -152,6 +158,7 @@ message RequestRelay {
+   string token = 8;
+   ControlPermissions control_permissions = 9;
+   ControlledContext controlled_context = 10;
++  SmartRelayConnectOffer smart_relay = 1001;
+ }
+
+ message RelayResponse {
+@@ -167,6 +174,7 @@ message RelayResponse {
+   int32 feedback = 9;
+   bytes socket_addr_v6 = 10;
+   int32 upnp_port = 11;
++  SmartRelaySelection smart_relay = 1001;
+ }
+
+ message SoftwareUpdate { string url = 1; }
+@@ -181,6 +189,7 @@ message FetchLocalAddr {
+   bytes socket_addr_v6 = 3;
+   ControlPermissions control_permissions = 4;
+   ControlledContext controlled_context = 5;
++  SmartRelaySelection smart_relay = 1001;
+ }
+
+ message LocalAddr {
+@@ -190,6 +199,7 @@ message LocalAddr {
+   string id = 4;
+   string version = 5;
+   bytes socket_addr_v6 = 6;
++  SmartRelaySelection smart_relay = 1001;
+ }
+
+ message PeerDiscovery {
+@@ -219,6 +229,142 @@ message HealthCheck {
+   string token = 1;
+ }
+
++enum SmartRelayAddressFamily {
++  SMART_AF_UNSPECIFIED = 0;
++  SMART_AF_IPV4 = 1;
++}
++
++enum SmartRelayProbePurpose {
++  SMART_PURPOSE_UNSPECIFIED = 0;
++  SMART_WARMUP = 1;
++  SMART_SESSION = 2;
++}
++
++enum SmartRelayPeerRole {
++  SMART_ROLE_UNSPECIFIED = 0;
++  SMART_REQUESTER = 1;
++  SMART_TARGET = 2;
++}
++
++enum SmartRelayProbeStatus {
++  SMART_PROBE_UNSPECIFIED = 0;
++  SMART_PROBE_OK = 1;
++  SMART_PROBE_TIMEOUT = 2;
++  SMART_PROBE_REFUSED = 3;
++  SMART_PROBE_NETWORK_ERROR = 4;
++  SMART_PROBE_INVALID_ADDRESS = 5;
++}
++
++enum SmartRelaySelectionMode {
++  SMART_SELECTION_UNSPECIFIED = 0;
++  SMART_SELECTION_REAL_BOTH = 1;
++  SMART_SELECTION_REAL_ONE = 2;
++  SMART_SELECTION_ESTIMATED = 3;
++  SMART_SELECTION_TELEMETRY_FALLBACK = 4;
++  SMART_SELECTION_OFFICIAL_FALLBACK = 5;
++  SMART_SELECTION_QUALITY_DEGRADED = 6;
++}
++
++message SmartRelayCapability {
++  uint32 min_protocol = 1;
++  uint32 max_protocol = 2;
++  uint64 feature_bits = 3;
++  uint32 max_candidates = 4;
++  bytes client_nonce = 5;
++  uint64 issued_at_ms = 6;
++  bytes signature = 7;
++  reserved 50 to 99;
++}
++
++message SmartRelayCandidate {
++  bytes node_id = 1;
++  SmartRelayAddressFamily address_family = 2;
++  bytes address = 3;
++  uint32 port = 4;
++  uint32 probe_timeout_ms = 5;
++  reserved 50 to 99;
++}
++
++message SmartRelaySelection {
++  uint32 protocol_version = 1;
++  string requester_id = 2;
++  string target_id = 3;
++  bytes node_id = 4;
++  string relay_server = 5;
++  uint64 expires_at_ms = 6;
++  bytes origin_request_nonce = 7;
++  ConnType conn_type = 8;
++  SmartRelaySelectionMode mode = 9;
++  bytes server_signature = 10;
++  reserved 50 to 99;
++}
++
++message SmartRelayConnectOffer {
++  uint32 protocol_version = 1;
++  string requester_id = 2;
++  bytes request_nonce = 3;
++  uint64 issued_at_ms = 4;
++  SmartRelaySelection selection = 5;
++  bytes signature = 6;
++  reserved 50 to 99;
++}
++
++message SmartRelayProbeRequest {
++  uint32 protocol_version = 1;
++  bytes probe_id = 2;
++  bytes role_nonce = 3;
++  bytes candidate_set_hash = 4;
++  SmartRelayProbePurpose purpose = 5;
++  SmartRelayPeerRole role = 6;
++  uint64 issued_at_ms = 7;
++  uint32 deadline_ms = 8;
++  repeated SmartRelayCandidate candidates = 9;
++  string requester_id = 10;
++  string target_id = 11;
++  ConnType conn_type = 12;
++  bytes server_signature = 13;
++  reserved 50 to 99;
++}
++
++message SmartRelayProbeResult {
++  bytes node_id = 1;
++  SmartRelayProbeStatus status = 2;
++  repeated uint32 rtt_us = 3;
++  uint32 sample_age_ms = 4;
++  reserved 50 to 99;
++}
++
++message SmartRelayProbeReport {
++  uint32 protocol_version = 1;
++  bytes probe_id = 2;
++  bytes role_nonce = 3;
++  bytes candidate_set_hash = 4;
++  SmartRelayPeerRole role = 5;
++  string client_id = 6;
++  bytes network_epoch = 7;
++  repeated SmartRelayProbeResult results = 8;
++  uint64 sent_at_ms = 9;
++  bytes client_signature = 10;
++  reserved 50 to 99;
++}
++
++message SmartRelayCapabilityRequest {
++  bytes nonce = 1;
++  uint32 max_protocol = 2;
++  uint64 requested_feature_bits = 3;
++  reserved 50 to 99;
++}
++
++message SmartRelayCapabilityResponse {
++  bytes nonce = 1;
++  uint32 min_protocol = 2;
++  uint32 max_protocol = 3;
++  string server_build = 4;
++  uint64 feature_bits = 5;
++  bytes server_signature = 6;
++  reserved 50 to 99;
++}
++
+ message HeaderEntry {
+   string name = 1;
+   string value = 2;
+@@ -263,5 +409,9 @@ message RendezvousMessage {
+     HealthCheck hc = 26;
+     HttpProxyRequest http_proxy_request = 27;
+     HttpProxyResponse http_proxy_response = 28;
++    SmartRelayProbeRequest smart_relay_probe_request = 1001;
++    SmartRelayProbeReport smart_relay_probe_report = 1002;
++    SmartRelayCapabilityRequest smart_relay_capability_request = 1003;
++    SmartRelayCapabilityResponse smart_relay_capability_response = 1004;
+   }
+ }
+diff --git a/src/lib.rs b/src/lib.rs
+index 2b3564219062fc6d2dbe3fe4fa059aad6e61bb58..ab58add209ea26b9ec68e0c14cbccc5a2e8aa370 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,6 +1,7 @@
+ pub mod compress;
+ pub mod platform;
+ pub mod protos;
++pub mod smart_relay;
+ pub use bytes;
+ use config::Config;
+ pub use futures;
+diff --git a/src/smart_relay.rs b/src/smart_relay.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..b55c11f0b4a747fd4fbb3b943864d9088a0c8249
+--- /dev/null
++++ b/src/smart_relay.rs
+@@ -0,0 +1,1646 @@
++use crate::rendezvous_proto::{
++    ConnType, SmartRelayAddressFamily, SmartRelayCandidate, SmartRelayCapability,
++    SmartRelayCapabilityRequest, SmartRelayCapabilityResponse, SmartRelayConnectOffer,
++    SmartRelayPeerRole, SmartRelayProbePurpose, SmartRelayProbeReport, SmartRelayProbeRequest,
++    SmartRelayProbeResult, SmartRelayProbeStatus, SmartRelaySelection, SmartRelaySelectionMode,
++};
++use protobuf::Message;
++use sha2::{Digest, Sha256};
++use sodiumoxide::crypto::sign;
++use std::{
++    collections::HashSet,
++    convert::{TryFrom, TryInto},
++    net::{Ipv4Addr, SocketAddrV4},
++    str::FromStr,
++};
++use thiserror::Error;
++
++pub const SMART_RELAY_PROTOCOL_V1: u32 = 1;
++pub const SMART_RELAY_MAX_WIRE_BYTES: usize = 4 * 1024;
++pub const SMART_RELAY_MAX_CANDIDATES: usize = 6;
++pub const SMART_RELAY_MAX_RTT_SAMPLES: usize = 3;
++pub const SMART_RELAY_MAX_ID_BYTES: usize = 64;
++pub const SMART_RELAY_MAX_RELAY_SERVER_BYTES: usize = 64;
++pub const SMART_RELAY_MAX_SERVER_BUILD_BYTES: usize = 64;
++pub const SMART_RELAY_MAX_SAMPLE_AGE_MS: u32 = 30 * 60 * 1000;
++pub const SMART_RELAY_MAX_REPORT_CUTOFF_MS: u32 = 2_000;
++pub const SMART_RELAY_MIN_CONNECT_TIMEOUT_MS: u32 = 200;
++pub const SMART_RELAY_MAX_CONNECT_TIMEOUT_MS: u32 = 1_500;
++pub const SMART_RELAY_FEATURE_TCP_CONNECT_PROBE: u64 = 1 << 0;
++pub const SMART_RELAY_FEATURE_SIGNED_REPORT: u64 = 1 << 1;
++pub const SMART_RELAY_FEATURE_NETWORK_EPOCH_CACHE: u64 = 1 << 2;
++pub const SMART_RELAY_FEATURE_SIGNED_SELECTION_REUSE: u64 = 1 << 3;
++pub const SMART_RELAY_REQUIRED_SESSION_FEATURES: u64 = SMART_RELAY_FEATURE_TCP_CONNECT_PROBE
++    | SMART_RELAY_FEATURE_SIGNED_REPORT
++    | SMART_RELAY_FEATURE_SIGNED_SELECTION_REUSE;
++
++const DOMAIN_CAPABILITY: &[u8] = b"RDSMART/CAPABILITY/V1";
++const DOMAIN_CONNECT_PUNCH: &[u8] = b"RDSMART/CONNECT/PUNCH/V1";
++const DOMAIN_CONNECT_RELAY: &[u8] = b"RDSMART/CONNECT/RELAY/V1";
++const DOMAIN_PROBE_REQUEST: &[u8] = b"RDSMART/PROBE-REQUEST/V1";
++const DOMAIN_PROBE_REPORT: &[u8] = b"RDSMART/PROBE-REPORT/V1";
++const DOMAIN_SELECTION: &[u8] = b"RDSMART/SELECTION/V1";
++const DOMAIN_CAPABILITY_RESPONSE: &[u8] = b"RDSMART/CAPABILITY-RESPONSE/V1";
++
++#[derive(Debug, Error, Clone, PartialEq, Eq)]
++pub enum SmartRelayWireError {
++    #[error("smart relay message exceeds the 4 KiB limit")]
++    MessageTooLarge,
++    #[error("smart relay protobuf decoding failed")]
++    Protobuf,
++    #[error("unknown protobuf fields in {0}")]
++    UnknownFields(&'static str),
++    #[error("unsupported smart relay protocol version")]
++    UnsupportedVersion,
++    #[error("invalid length for {0}")]
++    InvalidLength(&'static str),
++    #[error("invalid ASCII value for {0}")]
++    InvalidAscii(&'static str),
++    #[error("unknown or invalid enum value for {0}")]
++    InvalidEnum(&'static str),
++    #[error("invalid value for {0}")]
++    InvalidValue(&'static str),
++    #[error("too many smart relay candidates")]
++    TooManyCandidates,
++    #[error("duplicate smart relay candidate")]
++    DuplicateCandidate,
++    #[error("too many RTT samples")]
++    TooManyRttSamples,
++    #[error("duplicate smart relay probe result")]
++    DuplicateResult,
++    #[error("smart relay signed context does not match its outer message")]
++    ContextMismatch,
++    #[error("smart relay signature verification failed")]
++    InvalidSignature,
++}
++
++#[derive(Clone, Copy)]
++pub struct CapabilityTranscriptContext<'a> {
++    pub hbbs_key_fingerprint: &'a [u8; 32],
++    pub outer_peer_id: &'a str,
++    pub register_pk_public_key: Option<&'a [u8]>,
++}
++
++#[derive(Clone, Copy)]
++pub struct PunchConnectTranscriptContext<'a> {
++    pub hbbs_key_fingerprint: &'a [u8; 32],
++    pub requester_id: &'a str,
++    pub target_id: &'a str,
++    pub conn_type: ConnType,
++    pub force_relay: bool,
++}
++
++#[derive(Clone, Copy)]
++pub struct RelayConnectTranscriptContext<'a> {
++    pub hbbs_key_fingerprint: &'a [u8; 32],
++    pub requester_id: &'a str,
++    pub target_id: &'a str,
++    pub conn_type: ConnType,
++    pub secure: bool,
++    pub relay_attempt_uuid: &'a str,
++    pub relay_server: &'a str,
++}
++
++pub fn hbbs_key_fingerprint(raw_public_key: &[u8]) -> Result<[u8; 32], SmartRelayWireError> {
++    require_length(raw_public_key, 32, "hbbs public key")?;
++    Ok(Sha256::digest(raw_public_key).into())
++}
++
++pub fn supports_smart_session(capability: &SmartRelayCapability) -> bool {
++    capability.min_protocol <= SMART_RELAY_PROTOCOL_V1
++        && capability.max_protocol >= SMART_RELAY_PROTOCOL_V1
++        && capability.feature_bits & SMART_RELAY_REQUIRED_SESSION_FEATURES
++            == SMART_RELAY_REQUIRED_SESSION_FEATURES
++        && (1..=SMART_RELAY_MAX_CANDIDATES as u32).contains(&capability.max_candidates)
++}
++
++pub fn decode_capability(bytes: &[u8]) -> Result<SmartRelayCapability, SmartRelayWireError> {
++    let message = decode_message::<SmartRelayCapability>(bytes)?;
++    validate_capability(&message)?;
++    require_length(&message.signature, 64, "capability signature")?;
++    Ok(message)
++}
++
++pub fn decode_selection(bytes: &[u8]) -> Result<SmartRelaySelection, SmartRelayWireError> {
++    let message = decode_message::<SmartRelaySelection>(bytes)?;
++    validate_selection(&message, true)?;
++    Ok(message)
++}
++
++pub fn decode_connect_offer(bytes: &[u8]) -> Result<SmartRelayConnectOffer, SmartRelayWireError> {
++    let message = decode_message::<SmartRelayConnectOffer>(bytes)?;
++    reject_unknown(&message, "SmartRelayConnectOffer")?;
++    validate_protocol(message.protocol_version)?;
++    validate_ascii_token(
++        &message.requester_id,
++        SMART_RELAY_MAX_ID_BYTES,
++        false,
++        "requester_id",
++    )?;
++    require_length(&message.request_nonce, 16, "request_nonce")?;
++    if message.issued_at_ms == 0 {
++        return Err(SmartRelayWireError::InvalidValue("issued_at_ms"));
++    }
++    validate_signature_slot(&message.signature, "connect signature")?;
++    require_length(&message.signature, 64, "connect signature")?;
++    if let Some(selection) = message.selection.as_ref() {
++        validate_selection(selection, true)?;
++    }
++    Ok(message)
++}
++
++pub fn decode_probe_request(bytes: &[u8]) -> Result<SmartRelayProbeRequest, SmartRelayWireError> {
++    let message = decode_message::<SmartRelayProbeRequest>(bytes)?;
++    validate_probe_request(&message)?;
++    require_length(&message.server_signature, 64, "server signature")?;
++    Ok(message)
++}
++
++pub fn decode_probe_report(bytes: &[u8]) -> Result<SmartRelayProbeReport, SmartRelayWireError> {
++    let message = decode_message::<SmartRelayProbeReport>(bytes)?;
++    validate_probe_report(&message)?;
++    require_length(&message.client_signature, 64, "client signature")?;
++    Ok(message)
++}
++
++pub fn decode_capability_request(
++    bytes: &[u8],
++) -> Result<SmartRelayCapabilityRequest, SmartRelayWireError> {
++    let message = decode_message::<SmartRelayCapabilityRequest>(bytes)?;
++    validate_capability_request(&message)?;
++    Ok(message)
++}
++
++pub fn decode_capability_response(
++    bytes: &[u8],
++) -> Result<SmartRelayCapabilityResponse, SmartRelayWireError> {
++    let message = decode_message::<SmartRelayCapabilityResponse>(bytes)?;
++    validate_capability_response(&message)?;
++    require_length(&message.server_signature, 64, "server signature")?;
++    Ok(message)
++}
++
++pub fn capability_transcript(
++    context: CapabilityTranscriptContext<'_>,
++    capability: &SmartRelayCapability,
++) -> Result<Vec<u8>, SmartRelayWireError> {
++    validate_capability(capability)?;
++    validate_ascii_token(
++        context.outer_peer_id,
++        SMART_RELAY_MAX_ID_BYTES,
++        false,
++        "outer peer id",
++    )?;
++    if let Some(public_key) = context.register_pk_public_key {
++        require_length(public_key, 32, "RegisterPk public key")?;
++    }
++    let mut out = Canonical::new(DOMAIN_CAPABILITY);
++    out.bytes(context.hbbs_key_fingerprint)?;
++    out.string(context.outer_peer_id)?;
++    out.optional_bytes(context.register_pk_public_key)?;
++    out.u32(capability.min_protocol);
++    out.u32(capability.max_protocol);
++    out.u64(capability.feature_bits);
++    out.u32(capability.max_candidates);
++    out.bytes(&capability.client_nonce)?;
++    out.u64(capability.issued_at_ms);
++    out.finish()
++}
++
++pub fn punch_connect_transcript(
++    context: PunchConnectTranscriptContext<'_>,
++    offer: &SmartRelayConnectOffer,
++) -> Result<Vec<u8>, SmartRelayWireError> {
++    validate_connect_offer_core(offer)?;
++    if offer.selection.is_some()
++        || offer.requester_id != context.requester_id
++        || !valid_conn_type(context.conn_type as i32)
++    {
++        return Err(SmartRelayWireError::ContextMismatch);
++    }
++    validate_ascii_token(
++        context.target_id,
++        SMART_RELAY_MAX_ID_BYTES,
++        false,
++        "target_id",
++    )?;
++    let mut out = Canonical::new(DOMAIN_CONNECT_PUNCH);
++    out.bytes(context.hbbs_key_fingerprint)?;
++    out.string(context.requester_id)?;
++    out.string(context.target_id)?;
++    out.u32(context.conn_type as u32);
++    out.boolean(context.force_relay);
++    out.bytes(&offer.request_nonce)?;
++    out.u64(offer.issued_at_ms);
++    out.boolean(false);
++    out.finish()
++}
++
++pub fn relay_connect_transcript(
++    context: RelayConnectTranscriptContext<'_>,
++    offer: &SmartRelayConnectOffer,
++) -> Result<Vec<u8>, SmartRelayWireError> {
++    validate_connect_offer_core(offer)?;
++    validate_ascii_token(
++        context.target_id,
++        SMART_RELAY_MAX_ID_BYTES,
++        false,
++        "target_id",
++    )?;
++    validate_ascii_token(
++        context.relay_attempt_uuid,
++        SMART_RELAY_MAX_ID_BYTES,
++        false,
++        "relay attempt UUID",
++    )?;
++    validate_relay_server(context.relay_server)?;
++    if offer.requester_id != context.requester_id || !valid_conn_type(context.conn_type as i32) {
++        return Err(SmartRelayWireError::ContextMismatch);
++    }
++    let selection = offer
++        .selection
++        .as_ref()
++        .ok_or(SmartRelayWireError::ContextMismatch)?;
++    validate_selection(selection, true)?;
++    if selection.requester_id != context.requester_id
++        || selection.target_id != context.target_id
++        || selection.conn_type.value() != context.conn_type as i32
++        || selection.relay_server != context.relay_server
++        || selection.origin_request_nonce.as_ref() != offer.request_nonce.as_ref()
++    {
++        return Err(SmartRelayWireError::ContextMismatch);
++    }
++    let blob = signed_selection_blob(selection)?;
++    let mut out = Canonical::new(DOMAIN_CONNECT_RELAY);
++    out.bytes(context.hbbs_key_fingerprint)?;
++    out.string(context.requester_id)?;
++    out.string(context.target_id)?;
++    out.u32(context.conn_type as u32);
++    out.boolean(context.secure);
++    out.string(context.relay_attempt_uuid)?;
++    out.string(context.relay_server)?;
++    out.bytes(&offer.request_nonce)?;
++    out.u64(offer.issued_at_ms);
++    out.boolean(true);
++    out.raw(&blob);
++    out.finish()
++}
++
++pub fn probe_request_transcript(
++    request: &SmartRelayProbeRequest,
++) -> Result<Vec<u8>, SmartRelayWireError> {
++    validate_probe_request(request)?;
++    let mut out = Canonical::new(DOMAIN_PROBE_REQUEST);
++    out.u32(request.protocol_version);
++    out.bytes(&request.probe_id)?;
++    out.bytes(&request.role_nonce)?;
++    out.bytes(&request.candidate_set_hash)?;
++    out.u32(request.purpose.value() as u32);
++    out.u32(request.role.value() as u32);
++    out.u64(request.issued_at_ms);
++    out.u32(request.deadline_ms);
++    append_candidates(&mut out, &request.candidates)?;
++    out.string(&request.requester_id)?;
++    out.string(&request.target_id)?;
++    out.u32(request.conn_type.value() as u32);
++    out.finish()
++}
++
++pub fn probe_report_transcript(
++    report: &SmartRelayProbeReport,
++) -> Result<Vec<u8>, SmartRelayWireError> {
++    validate_probe_report(report)?;
++    let mut out = Canonical::new(DOMAIN_PROBE_REPORT);
++    out.u32(report.protocol_version);
++    out.bytes(&report.probe_id)?;
++    out.bytes(&report.role_nonce)?;
++    out.bytes(&report.candidate_set_hash)?;
++    out.u32(report.role.value() as u32);
++    out.string(&report.client_id)?;
++    out.bytes(&report.network_epoch)?;
++    append_results(&mut out, &report.results)?;
++    out.u64(report.sent_at_ms);
++    out.finish()
++}
++
++pub fn selection_transcript(
++    selection: &SmartRelaySelection,
++) -> Result<Vec<u8>, SmartRelayWireError> {
++    validate_selection(selection, false)?;
++    let mut out = Canonical::new(DOMAIN_SELECTION);
++    out.u32(selection.protocol_version);
++    out.string(&selection.requester_id)?;
++    out.string(&selection.target_id)?;
++    out.bytes(&selection.node_id)?;
++    out.string(&selection.relay_server)?;
++    out.u64(selection.expires_at_ms);
++    out.bytes(&selection.origin_request_nonce)?;
++    out.u32(selection.conn_type.value() as u32);
++    out.u32(selection.mode.value() as u32);
++    out.finish()
++}
++
++pub fn capability_response_transcript(
++    response: &SmartRelayCapabilityResponse,
++) -> Result<Vec<u8>, SmartRelayWireError> {
++    validate_capability_response(response)?;
++    let mut out = Canonical::new(DOMAIN_CAPABILITY_RESPONSE);
++    out.bytes(&response.nonce)?;
++    out.u32(response.min_protocol);
++    out.u32(response.max_protocol);
++    out.string(&response.server_build)?;
++    out.u64(response.feature_bits);
++    out.finish()
++}
++
++pub fn candidate_set_hash(
++    candidates: &[SmartRelayCandidate],
++) -> Result<[u8; 32], SmartRelayWireError> {
++    let mut out = Canonical::empty();
++    append_candidates(&mut out, candidates)?;
++    Ok(Sha256::digest(out.finish()?).into())
++}
++
++pub fn signed_selection_blob(
++    selection: &SmartRelaySelection,
++) -> Result<Vec<u8>, SmartRelayWireError> {
++    validate_selection(selection, true)?;
++    let transcript = selection_transcript(selection)?;
++    let mut blob = Vec::with_capacity(4 + transcript.len() + 4 + 64);
++    append_len(&mut blob, transcript.len())?;
++    blob.extend_from_slice(&transcript);
++    append_len(&mut blob, selection.server_signature.len())?;
++    blob.extend_from_slice(&selection.server_signature);
++    if blob.len() > SMART_RELAY_MAX_WIRE_BYTES {
++        return Err(SmartRelayWireError::MessageTooLarge);
++    }
++    Ok(blob)
++}
++
++pub fn sign_transcript(transcript: &[u8], secret_key: &sign::SecretKey) -> [u8; 64] {
++    sign::sign_detached(transcript, secret_key).to_bytes()
++}
++
++pub fn verify_transcript(
++    transcript: &[u8],
++    signature: &[u8],
++    public_key: &sign::PublicKey,
++) -> Result<(), SmartRelayWireError> {
++    require_length(signature, 64, "signature")?;
++    let signature = sign::Signature::from_bytes(signature)
++        .map_err(|_| SmartRelayWireError::InvalidSignature)?;
++    if sign::verify_detached(&signature, transcript, public_key) {
++        Ok(())
++    } else {
++        Err(SmartRelayWireError::InvalidSignature)
++    }
++}
++
++pub fn verify_capability_signature(
++    context: CapabilityTranscriptContext<'_>,
++    capability: &SmartRelayCapability,
++    device_public_key: &sign::PublicKey,
++) -> Result<(), SmartRelayWireError> {
++    let transcript = capability_transcript(context, capability)?;
++    verify_transcript(&transcript, &capability.signature, device_public_key)
++}
++
++pub fn verify_punch_connect_signature(
++    context: PunchConnectTranscriptContext<'_>,
++    offer: &SmartRelayConnectOffer,
++    device_public_key: &sign::PublicKey,
++) -> Result<(), SmartRelayWireError> {
++    let transcript = punch_connect_transcript(context, offer)?;
++    verify_transcript(&transcript, &offer.signature, device_public_key)
++}
++
++pub fn verify_relay_connect_signatures(
++    context: RelayConnectTranscriptContext<'_>,
++    offer: &SmartRelayConnectOffer,
++    device_public_key: &sign::PublicKey,
++    hbbs_public_key: &sign::PublicKey,
++) -> Result<(), SmartRelayWireError> {
++    let transcript = relay_connect_transcript(context, offer)?;
++    let selection = offer
++        .selection
++        .as_ref()
++        .ok_or(SmartRelayWireError::ContextMismatch)?;
++    verify_selection_signature(selection, hbbs_public_key)?;
++    verify_transcript(&transcript, &offer.signature, device_public_key)
++}
++
++pub fn verify_probe_request_signature(
++    request: &SmartRelayProbeRequest,
++    hbbs_public_key: &sign::PublicKey,
++) -> Result<(), SmartRelayWireError> {
++    let transcript = probe_request_transcript(request)?;
++    verify_transcript(&transcript, &request.server_signature, hbbs_public_key)
++}
++
++pub fn verify_probe_report_signature(
++    report: &SmartRelayProbeReport,
++    device_public_key: &sign::PublicKey,
++) -> Result<(), SmartRelayWireError> {
++    let transcript = probe_report_transcript(report)?;
++    verify_transcript(&transcript, &report.client_signature, device_public_key)
++}
++
++pub fn verify_selection_signature(
++    selection: &SmartRelaySelection,
++    hbbs_public_key: &sign::PublicKey,
++) -> Result<(), SmartRelayWireError> {
++    let transcript = selection_transcript(selection)?;
++    verify_transcript(&transcript, &selection.server_signature, hbbs_public_key)
++}
++
++pub fn verify_capability_response_signature(
++    response: &SmartRelayCapabilityResponse,
++    hbbs_public_key: &sign::PublicKey,
++) -> Result<(), SmartRelayWireError> {
++    let transcript = capability_response_transcript(response)?;
++    verify_transcript(&transcript, &response.server_signature, hbbs_public_key)
++}
++
++pub fn validate_probe_report_for_request(
++    report: &SmartRelayProbeReport,
++    request: &SmartRelayProbeRequest,
++) -> Result<(), SmartRelayWireError> {
++    validate_probe_request(request)?;
++    validate_probe_report(report)?;
++    require_length(&request.server_signature, 64, "server signature")?;
++    require_length(&report.client_signature, 64, "client signature")?;
++    if report.probe_id != request.probe_id
++        || report.role_nonce != request.role_nonce
++        || report.candidate_set_hash != request.candidate_set_hash
++        || report.role.value() != request.role.value()
++    {
++        return Err(SmartRelayWireError::ContextMismatch);
++    }
++    if request.purpose.value() == SmartRelayProbePurpose::SMART_SESSION as i32 {
++        let expected_client_id = match request.role.value() {
++            role if role == SmartRelayPeerRole::SMART_REQUESTER as i32 => {
++                request.requester_id.as_str()
++            }
++            role if role == SmartRelayPeerRole::SMART_TARGET as i32 => request.target_id.as_str(),
++            _ => return Err(SmartRelayWireError::ContextMismatch),
++        };
++        if report.client_id != expected_client_id {
++            return Err(SmartRelayWireError::ContextMismatch);
++        }
++    }
++    let candidates: HashSet<[u8; 16]> = request
++        .candidates
++        .iter()
++        .map(|candidate| fixed_array(&candidate.node_id, "candidate node_id"))
++        .collect::<Result<_, _>>()?;
++    for result in &report.results {
++        if !candidates.contains(&fixed_array(&result.node_id, "result node_id")?) {
++            return Err(SmartRelayWireError::ContextMismatch);
++        }
++    }
++    Ok(())
++}
++
++fn decode_message<M>(bytes: &[u8]) -> Result<M, SmartRelayWireError>
++where
++    M: Message + Default,
++{
++    if bytes.len() > SMART_RELAY_MAX_WIRE_BYTES {
++        return Err(SmartRelayWireError::MessageTooLarge);
++    }
++    M::parse_from_bytes(bytes).map_err(|_| SmartRelayWireError::Protobuf)
++}
++
++fn validate_capability(capability: &SmartRelayCapability) -> Result<(), SmartRelayWireError> {
++    reject_unknown(capability, "SmartRelayCapability")?;
++    if capability.min_protocol == 0
++        || capability.max_protocol < capability.min_protocol
++        || capability.min_protocol > SMART_RELAY_PROTOCOL_V1
++        || capability.max_protocol < SMART_RELAY_PROTOCOL_V1
++    {
++        return Err(SmartRelayWireError::UnsupportedVersion);
++    }
++    if !(1..=SMART_RELAY_MAX_CANDIDATES as u32).contains(&capability.max_candidates) {
++        return Err(SmartRelayWireError::InvalidValue("max_candidates"));
++    }
++    require_length(&capability.client_nonce, 16, "client_nonce")?;
++    if capability.issued_at_ms == 0 {
++        return Err(SmartRelayWireError::InvalidValue("issued_at_ms"));
++    }
++    validate_signature_slot(&capability.signature, "capability signature")
++}
++
++fn validate_capability_request(
++    request: &SmartRelayCapabilityRequest,
++) -> Result<(), SmartRelayWireError> {
++    reject_unknown(request, "SmartRelayCapabilityRequest")?;
++    require_length(&request.nonce, 16, "capability nonce")?;
++    if request.max_protocol < SMART_RELAY_PROTOCOL_V1 {
++        return Err(SmartRelayWireError::UnsupportedVersion);
++    }
++    Ok(())
++}
++
++fn validate_capability_response(
++    response: &SmartRelayCapabilityResponse,
++) -> Result<(), SmartRelayWireError> {
++    reject_unknown(response, "SmartRelayCapabilityResponse")?;
++    require_length(&response.nonce, 16, "capability nonce")?;
++    if response.min_protocol == 0
++        || response.max_protocol < response.min_protocol
++        || response.min_protocol > SMART_RELAY_PROTOCOL_V1
++        || response.max_protocol < SMART_RELAY_PROTOCOL_V1
++    {
++        return Err(SmartRelayWireError::UnsupportedVersion);
++    }
++    validate_ascii_printable(
++        &response.server_build,
++        SMART_RELAY_MAX_SERVER_BUILD_BYTES,
++        false,
++        "server_build",
++    )?;
++    validate_signature_slot(&response.server_signature, "server signature")
++}
++
++fn validate_connect_offer_core(offer: &SmartRelayConnectOffer) -> Result<(), SmartRelayWireError> {
++    reject_unknown(offer, "SmartRelayConnectOffer")?;
++    validate_protocol(offer.protocol_version)?;
++    validate_ascii_token(
++        &offer.requester_id,
++        SMART_RELAY_MAX_ID_BYTES,
++        false,
++        "requester_id",
++    )?;
++    require_length(&offer.request_nonce, 16, "request_nonce")?;
++    if offer.issued_at_ms == 0 {
++        return Err(SmartRelayWireError::InvalidValue("issued_at_ms"));
++    }
++    validate_signature_slot(&offer.signature, "connect signature")
++}
++
++fn validate_probe_request(request: &SmartRelayProbeRequest) -> Result<(), SmartRelayWireError> {
++    reject_unknown(request, "SmartRelayProbeRequest")?;
++    validate_protocol(request.protocol_version)?;
++    require_length(&request.probe_id, 16, "probe_id")?;
++    require_length(&request.role_nonce, 32, "role_nonce")?;
++    require_length(&request.candidate_set_hash, 32, "candidate_set_hash")?;
++    let purpose = request
++        .purpose
++        .enum_value()
++        .map_err(|_| SmartRelayWireError::InvalidEnum("probe purpose"))?;
++    let role = request
++        .role
++        .enum_value()
++        .map_err(|_| SmartRelayWireError::InvalidEnum("peer role"))?;
++    if !matches!(
++        purpose,
++        SmartRelayProbePurpose::SMART_WARMUP | SmartRelayProbePurpose::SMART_SESSION
++    ) || !matches!(
++        role,
++        SmartRelayPeerRole::SMART_REQUESTER | SmartRelayPeerRole::SMART_TARGET
++    ) {
++        return Err(SmartRelayWireError::InvalidEnum("probe context"));
++    }
++    if request.issued_at_ms == 0
++        || request.deadline_ms == 0
++        || request.deadline_ms > SMART_RELAY_MAX_REPORT_CUTOFF_MS
++    {
++        return Err(SmartRelayWireError::InvalidValue("probe deadline"));
++    }
++    validate_candidates(&request.candidates)?;
++    if candidate_set_hash(&request.candidates)?.as_slice() != request.candidate_set_hash.as_ref() {
++        return Err(SmartRelayWireError::ContextMismatch);
++    }
++    validate_signature_slot(&request.server_signature, "server signature")?;
++    if !valid_conn_type(request.conn_type.value()) {
++        return Err(SmartRelayWireError::InvalidEnum("conn_type"));
++    }
++    match purpose {
++        SmartRelayProbePurpose::SMART_WARMUP => {
++            if !request.requester_id.is_empty()
++                || !request.target_id.is_empty()
++                || request.conn_type.value() != ConnType::DEFAULT_CONN as i32
++            {
++                return Err(SmartRelayWireError::ContextMismatch);
++            }
++        }
++        SmartRelayProbePurpose::SMART_SESSION => {
++            validate_ascii_token(
++                &request.target_id,
++                SMART_RELAY_MAX_ID_BYTES,
++                false,
++                "target_id",
++            )?;
++            validate_ascii_token(
++                &request.requester_id,
++                SMART_RELAY_MAX_ID_BYTES,
++                false,
++                "requester_id",
++            )?;
++        }
++        _ => return Err(SmartRelayWireError::InvalidEnum("probe purpose")),
++    }
++    Ok(())
++}
++
++fn validate_probe_report(report: &SmartRelayProbeReport) -> Result<(), SmartRelayWireError> {
++    reject_unknown(report, "SmartRelayProbeReport")?;
++    validate_protocol(report.protocol_version)?;
++    require_length(&report.probe_id, 16, "probe_id")?;
++    require_length(&report.role_nonce, 32, "role_nonce")?;
++    require_length(&report.candidate_set_hash, 32, "candidate_set_hash")?;
++    let role = report
++        .role
++        .enum_value()
++        .map_err(|_| SmartRelayWireError::InvalidEnum("peer role"))?;
++    if !matches!(
++        role,
++        SmartRelayPeerRole::SMART_REQUESTER | SmartRelayPeerRole::SMART_TARGET
++    ) {
++        return Err(SmartRelayWireError::InvalidEnum("peer role"));
++    }
++    validate_ascii_token(
++        &report.client_id,
++        SMART_RELAY_MAX_ID_BYTES,
++        false,
++        "client_id",
++    )?;
++    require_length(&report.network_epoch, 16, "network_epoch")?;
++    if report.results.is_empty() || report.results.len() > SMART_RELAY_MAX_CANDIDATES {
++        return Err(SmartRelayWireError::TooManyCandidates);
++    }
++    let mut node_ids: HashSet<[u8; 16]> = HashSet::with_capacity(report.results.len());
++    for result in &report.results {
++        validate_probe_result(result)?;
++        if !node_ids.insert(fixed_array(&result.node_id, "result node_id")?) {
++            return Err(SmartRelayWireError::DuplicateResult);
++        }
++    }
++    if report.sent_at_ms == 0 {
++        return Err(SmartRelayWireError::InvalidValue("sent_at_ms"));
++    }
++    validate_signature_slot(&report.client_signature, "client signature")
++}
++
++fn validate_probe_result(result: &SmartRelayProbeResult) -> Result<(), SmartRelayWireError> {
++    reject_unknown(result, "SmartRelayProbeResult")?;
++    require_length(&result.node_id, 16, "result node_id")?;
++    let status = result
++        .status
++        .enum_value()
++        .map_err(|_| SmartRelayWireError::InvalidEnum("probe status"))?;
++    if status == SmartRelayProbeStatus::SMART_PROBE_UNSPECIFIED {
++        return Err(SmartRelayWireError::InvalidEnum("probe status"));
++    }
++    if result.rtt_us.len() > SMART_RELAY_MAX_RTT_SAMPLES {
++        return Err(SmartRelayWireError::TooManyRttSamples);
++    }
++    if status == SmartRelayProbeStatus::SMART_PROBE_OK {
++        if result.rtt_us.is_empty()
++            || result
++                .rtt_us
++                .iter()
++                .any(|sample| !(1_000..=3_000_000).contains(sample))
++            || result.sample_age_ms > SMART_RELAY_MAX_SAMPLE_AGE_MS
++        {
++            return Err(SmartRelayWireError::InvalidValue("successful probe result"));
++        }
++    } else if !result.rtt_us.is_empty() || result.sample_age_ms != 0 {
++        return Err(SmartRelayWireError::InvalidValue("failed probe result"));
++    }
++    Ok(())
++}
++
++fn validate_candidates(candidates: &[SmartRelayCandidate]) -> Result<(), SmartRelayWireError> {
++    if candidates.is_empty() || candidates.len() > SMART_RELAY_MAX_CANDIDATES {
++        return Err(SmartRelayWireError::TooManyCandidates);
++    }
++    let mut node_ids: HashSet<[u8; 16]> = HashSet::with_capacity(candidates.len());
++    for candidate in candidates {
++        validate_candidate(candidate)?;
++        if !node_ids.insert(fixed_array(&candidate.node_id, "candidate node_id")?) {
++            return Err(SmartRelayWireError::DuplicateCandidate);
++        }
++    }
++    Ok(())
++}
++
++fn validate_candidate(candidate: &SmartRelayCandidate) -> Result<(), SmartRelayWireError> {
++    reject_unknown(candidate, "SmartRelayCandidate")?;
++    require_length(&candidate.node_id, 16, "candidate node_id")?;
++    let family = candidate
++        .address_family
++        .enum_value()
++        .map_err(|_| SmartRelayWireError::InvalidEnum("address_family"))?;
++    if family != SmartRelayAddressFamily::SMART_AF_IPV4 {
++        return Err(SmartRelayWireError::InvalidEnum("address_family"));
++    }
++    let octets: [u8; 4] = fixed_array(&candidate.address, "candidate IPv4")?;
++    if !is_usable_public_ipv4(Ipv4Addr::from(octets)) {
++        return Err(SmartRelayWireError::InvalidValue("candidate IPv4"));
++    }
++    if !(1..=u16::MAX as u32).contains(&candidate.port) {
++        return Err(SmartRelayWireError::InvalidValue("candidate port"));
++    }
++    if !(SMART_RELAY_MIN_CONNECT_TIMEOUT_MS..=SMART_RELAY_MAX_CONNECT_TIMEOUT_MS)
++        .contains(&candidate.probe_timeout_ms)
++    {
++        return Err(SmartRelayWireError::InvalidValue("probe_timeout_ms"));
++    }
++    Ok(())
++}
++
++fn validate_selection(
++    selection: &SmartRelaySelection,
++    require_signature: bool,
++) -> Result<(), SmartRelayWireError> {
++    reject_unknown(selection, "SmartRelaySelection")?;
++    validate_protocol(selection.protocol_version)?;
++    validate_ascii_token(
++        &selection.requester_id,
++        SMART_RELAY_MAX_ID_BYTES,
++        false,
++        "requester_id",
++    )?;
++    validate_ascii_token(
++        &selection.target_id,
++        SMART_RELAY_MAX_ID_BYTES,
++        false,
++        "target_id",
++    )?;
++    require_length(&selection.node_id, 16, "selection node_id")?;
++    validate_relay_server(&selection.relay_server)?;
++    if selection.expires_at_ms == 0 {
++        return Err(SmartRelayWireError::InvalidValue("expires_at_ms"));
++    }
++    require_length(&selection.origin_request_nonce, 16, "origin_request_nonce")?;
++    if !valid_conn_type(selection.conn_type.value()) {
++        return Err(SmartRelayWireError::InvalidEnum("conn_type"));
++    }
++    let mode = selection
++        .mode
++        .enum_value()
++        .map_err(|_| SmartRelayWireError::InvalidEnum("selection mode"))?;
++    if mode == SmartRelaySelectionMode::SMART_SELECTION_UNSPECIFIED {
++        return Err(SmartRelayWireError::InvalidEnum("selection mode"));
++    }
++    if require_signature {
++        require_length(&selection.server_signature, 64, "server signature")
++    } else {
++        validate_signature_slot(&selection.server_signature, "server signature")
++    }
++}
++
++fn append_candidates(
++    out: &mut Canonical,
++    candidates: &[SmartRelayCandidate],
++) -> Result<(), SmartRelayWireError> {
++    validate_candidates(candidates)?;
++    let mut sorted: Vec<&SmartRelayCandidate> = candidates.iter().collect();
++    sorted.sort_by(|left, right| {
++        left.node_id
++            .as_ref()
++            .cmp(right.node_id.as_ref())
++            .then_with(|| left.address.as_ref().cmp(right.address.as_ref()))
++            .then_with(|| left.port.cmp(&right.port))
++    });
++    out.count(sorted.len())?;
++    for candidate in sorted {
++        out.bytes(&candidate.node_id)?;
++        out.u32(candidate.address_family.value() as u32);
++        out.bytes(&candidate.address)?;
++        out.u32(candidate.port);
++        out.u32(candidate.probe_timeout_ms);
++    }
++    Ok(())
++}
++
++fn append_results(
++    out: &mut Canonical,
++    results: &[SmartRelayProbeResult],
++) -> Result<(), SmartRelayWireError> {
++    if results.is_empty() || results.len() > SMART_RELAY_MAX_CANDIDATES {
++        return Err(SmartRelayWireError::TooManyCandidates);
++    }
++    let mut sorted: Vec<&SmartRelayProbeResult> = results.iter().collect();
++    sorted.sort_by(|left, right| left.node_id.as_ref().cmp(right.node_id.as_ref()));
++    out.count(sorted.len())?;
++    for result in sorted {
++        validate_probe_result(result)?;
++        out.bytes(&result.node_id)?;
++        out.u32(result.status.value() as u32);
++        let mut samples = result.rtt_us.clone();
++        samples.sort_unstable();
++        out.count(samples.len())?;
++        for sample in samples {
++            out.u32(sample);
++        }
++        out.u32(result.sample_age_ms);
++    }
++    Ok(())
++}
++
++fn validate_protocol(version: u32) -> Result<(), SmartRelayWireError> {
++    if version == SMART_RELAY_PROTOCOL_V1 {
++        Ok(())
++    } else {
++        Err(SmartRelayWireError::UnsupportedVersion)
++    }
++}
++
++fn validate_signature_slot(value: &[u8], field: &'static str) -> Result<(), SmartRelayWireError> {
++    if value.is_empty() || value.len() == 64 {
++        Ok(())
++    } else {
++        Err(SmartRelayWireError::InvalidLength(field))
++    }
++}
++
++fn reject_unknown<M: Message>(message: &M, name: &'static str) -> Result<(), SmartRelayWireError> {
++    if message.unknown_fields().iter().next().is_some() {
++        Err(SmartRelayWireError::UnknownFields(name))
++    } else {
++        Ok(())
++    }
++}
++
++fn require_length(
++    value: &[u8],
++    expected: usize,
++    field: &'static str,
++) -> Result<(), SmartRelayWireError> {
++    if value.len() == expected {
++        Ok(())
++    } else {
++        Err(SmartRelayWireError::InvalidLength(field))
++    }
++}
++
++fn fixed_array<const N: usize>(
++    value: &[u8],
++    field: &'static str,
++) -> Result<[u8; N], SmartRelayWireError> {
++    value
++        .try_into()
++        .map_err(|_| SmartRelayWireError::InvalidLength(field))
++}
++
++fn validate_ascii_token(
++    value: &str,
++    maximum: usize,
++    allow_empty: bool,
++    field: &'static str,
++) -> Result<(), SmartRelayWireError> {
++    if value.len() > maximum
++        || (!allow_empty && value.is_empty())
++        || !value.is_ascii()
++        || value.bytes().any(|byte| !(0x21..=0x7e).contains(&byte))
++    {
++        Err(SmartRelayWireError::InvalidAscii(field))
++    } else {
++        Ok(())
++    }
++}
++
++fn validate_ascii_printable(
++    value: &str,
++    maximum: usize,
++    allow_empty: bool,
++    field: &'static str,
++) -> Result<(), SmartRelayWireError> {
++    if value.len() > maximum
++        || (!allow_empty && value.is_empty())
++        || !value.is_ascii()
++        || value.bytes().any(|byte| !(0x20..=0x7e).contains(&byte))
++    {
++        Err(SmartRelayWireError::InvalidAscii(field))
++    } else {
++        Ok(())
++    }
++}
++
++fn validate_relay_server(value: &str) -> Result<(), SmartRelayWireError> {
++    if value.len() > SMART_RELAY_MAX_RELAY_SERVER_BYTES {
++        return Err(SmartRelayWireError::InvalidLength("relay_server"));
++    }
++    let address = SocketAddrV4::from_str(value)
++        .map_err(|_| SmartRelayWireError::InvalidValue("relay_server"))?;
++    if address.to_string() != value || !is_usable_public_ipv4(*address.ip()) {
++        return Err(SmartRelayWireError::InvalidValue("relay_server"));
++    }
++    Ok(())
++}
++
++fn valid_conn_type(value: i32) -> bool {
++    (ConnType::DEFAULT_CONN as i32..=ConnType::TERMINAL as i32).contains(&value)
++}
++
++pub fn is_usable_public_ipv4(address: Ipv4Addr) -> bool {
++    let [a, b, c, d] = address.octets();
++    if a == 0
++        || a == 10
++        || a == 127
++        || a >= 224
++        || (a == 100 && (64..=127).contains(&b))
++        || (a == 169 && b == 254)
++        || (a == 172 && (16..=31).contains(&b))
++        || (a == 192 && b == 168)
++        || (a == 192 && b == 0 && c == 2)
++        || (a == 192 && b == 88 && c == 99)
++        || (a == 198 && (b == 18 || b == 19))
++        || (a == 198 && b == 51 && c == 100)
++        || (a == 203 && b == 0 && c == 113)
++    {
++        return false;
++    }
++    if a == 192 && b == 0 && c == 0 {
++        return matches!(d, 9 | 10);
++    }
++    true
++}
++
++struct Canonical {
++    bytes: Vec<u8>,
++}
++
++impl Canonical {
++    fn new(domain: &[u8]) -> Self {
++        let mut bytes = Vec::with_capacity(256);
++        bytes.extend_from_slice(domain);
++        bytes.push(0);
++        Self { bytes }
++    }
++
++    fn empty() -> Self {
++        Self {
++            bytes: Vec::with_capacity(256),
++        }
++    }
++
++    fn u32(&mut self, value: u32) {
++        self.bytes.extend_from_slice(&value.to_be_bytes());
++    }
++
++    fn u64(&mut self, value: u64) {
++        self.bytes.extend_from_slice(&value.to_be_bytes());
++    }
++
++    fn boolean(&mut self, value: bool) {
++        self.bytes.push(u8::from(value));
++    }
++
++    fn count(&mut self, value: usize) -> Result<(), SmartRelayWireError> {
++        let value = u32::try_from(value)
++            .map_err(|_| SmartRelayWireError::InvalidLength("canonical list"))?;
++        self.u32(value);
++        Ok(())
++    }
++
++    fn bytes(&mut self, value: &[u8]) -> Result<(), SmartRelayWireError> {
++        append_len(&mut self.bytes, value.len())?;
++        self.bytes.extend_from_slice(value);
++        Ok(())
++    }
++
++    fn raw(&mut self, value: &[u8]) {
++        self.bytes.extend_from_slice(value);
++    }
++
++    fn string(&mut self, value: &str) -> Result<(), SmartRelayWireError> {
++        self.bytes(value.as_bytes())
++    }
++
++    fn optional_bytes(&mut self, value: Option<&[u8]>) -> Result<(), SmartRelayWireError> {
++        match value {
++            Some(value) => {
++                self.boolean(true);
++                self.bytes(value)
++            }
++            None => {
++                self.boolean(false);
++                Ok(())
++            }
++        }
++    }
++
++    fn finish(self) -> Result<Vec<u8>, SmartRelayWireError> {
++        if self.bytes.len() > SMART_RELAY_MAX_WIRE_BYTES {
++            Err(SmartRelayWireError::MessageTooLarge)
++        } else {
++            Ok(self.bytes)
++        }
++    }
++}
++
++fn append_len(bytes: &mut Vec<u8>, length: usize) -> Result<(), SmartRelayWireError> {
++    let length =
++        u32::try_from(length).map_err(|_| SmartRelayWireError::InvalidLength("canonical value"))?;
++    bytes.extend_from_slice(&length.to_be_bytes());
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use bytes::Bytes;
++    use protobuf::{EnumOrUnknown, MessageField};
++
++    fn candidate(node: u8, address: [u8; 4], port: u32) -> SmartRelayCandidate {
++        let mut candidate = SmartRelayCandidate::new();
++        candidate.node_id = Bytes::from(vec![node; 16]);
++        candidate.address_family = SmartRelayAddressFamily::SMART_AF_IPV4.into();
++        candidate.address = Bytes::copy_from_slice(&address);
++        candidate.port = port;
++        candidate.probe_timeout_ms = 650;
++        candidate
++    }
++
++    fn candidates() -> Vec<SmartRelayCandidate> {
++        vec![
++            candidate(2, [8, 8, 8, 8], 21_118),
++            candidate(1, [1, 1, 1, 1], 21_117),
++        ]
++    }
++
++    fn capability() -> SmartRelayCapability {
++        let mut capability = SmartRelayCapability::new();
++        capability.min_protocol = 1;
++        capability.max_protocol = 1;
++        capability.feature_bits = SMART_RELAY_FEATURE_TCP_CONNECT_PROBE
++            | SMART_RELAY_FEATURE_SIGNED_REPORT
++            | SMART_RELAY_FEATURE_NETWORK_EPOCH_CACHE
++            | SMART_RELAY_FEATURE_SIGNED_SELECTION_REUSE;
++        capability.max_candidates = 6;
++        capability.client_nonce = Bytes::from(vec![0x11; 16]);
++        capability.issued_at_ms = 1_786_543_200_123;
++        capability.signature = Bytes::from(vec![0x71; 64]);
++        capability
++    }
++
++    fn selection() -> SmartRelaySelection {
++        let mut selection = SmartRelaySelection::new();
++        selection.protocol_version = 1;
++        selection.requester_id = "requester-a".to_owned();
++        selection.target_id = "target-b".to_owned();
++        selection.node_id = Bytes::from(vec![0x22; 16]);
++        selection.relay_server = "1.1.1.1:21117".to_owned();
++        selection.expires_at_ms = 1_786_543_320_123;
++        selection.origin_request_nonce = Bytes::from(vec![0x33; 16]);
++        selection.conn_type = ConnType::TERMINAL.into();
++        selection.mode = SmartRelaySelectionMode::SMART_SELECTION_REAL_BOTH.into();
++        selection.server_signature = Bytes::from(vec![0x72; 64]);
++        selection
++    }
++
++    fn connect_offer(with_selection: bool) -> SmartRelayConnectOffer {
++        let mut offer = SmartRelayConnectOffer::new();
++        offer.protocol_version = 1;
++        offer.requester_id = "requester-a".to_owned();
++        offer.request_nonce = Bytes::from(vec![0x33; 16]);
++        offer.issued_at_ms = 1_786_543_200_123;
++        if with_selection {
++            offer.selection = MessageField::some(selection());
++        }
++        offer.signature = Bytes::from(vec![0x73; 64]);
++        offer
++    }
++
++    fn probe_request(purpose: SmartRelayProbePurpose) -> SmartRelayProbeRequest {
++        let mut request = SmartRelayProbeRequest::new();
++        request.protocol_version = 1;
++        request.probe_id = Bytes::from(vec![0x44; 16]);
++        request.role_nonce = Bytes::from(vec![0x45; 32]);
++        request.candidates = candidates();
++        request.candidate_set_hash =
++            Bytes::copy_from_slice(&candidate_set_hash(&request.candidates).unwrap());
++        request.purpose = purpose.into();
++        request.role = SmartRelayPeerRole::SMART_REQUESTER.into();
++        request.issued_at_ms = 1_786_543_200_456;
++        request.deadline_ms = 1_500;
++        match purpose {
++            SmartRelayProbePurpose::SMART_WARMUP => {
++                request.conn_type = ConnType::DEFAULT_CONN.into();
++            }
++            SmartRelayProbePurpose::SMART_SESSION => {
++                request.requester_id = "requester-a".to_owned();
++                request.target_id = "target-b".to_owned();
++                request.conn_type = ConnType::TERMINAL.into();
++            }
++            _ => unreachable!(),
++        }
++        request.server_signature = Bytes::from(vec![0x74; 64]);
++        request
++    }
++
++    fn probe_report(request: &SmartRelayProbeRequest) -> SmartRelayProbeReport {
++        let mut first = SmartRelayProbeResult::new();
++        first.node_id = Bytes::from(vec![2; 16]);
++        first.status = SmartRelayProbeStatus::SMART_PROBE_OK.into();
++        first.rtt_us = vec![38_000, 35_000];
++        first.sample_age_ms = 25;
++
++        let mut second = SmartRelayProbeResult::new();
++        second.node_id = Bytes::from(vec![1; 16]);
++        second.status = SmartRelayProbeStatus::SMART_PROBE_TIMEOUT.into();
++
++        let mut report = SmartRelayProbeReport::new();
++        report.protocol_version = 1;
++        report.probe_id = request.probe_id.clone();
++        report.role_nonce = request.role_nonce.clone();
++        report.candidate_set_hash = request.candidate_set_hash.clone();
++        report.role = request.role;
++        report.client_id = "requester-a".to_owned();
++        report.network_epoch = Bytes::from(vec![0x46; 16]);
++        report.results = vec![first, second];
++        report.sent_at_ms = 1_786_543_200_789;
++        report.client_signature = Bytes::from(vec![0x75; 64]);
++        report
++    }
++
++    fn capability_response() -> SmartRelayCapabilityResponse {
++        let mut response = SmartRelayCapabilityResponse::new();
++        response.nonce = Bytes::from(vec![0x51; 16]);
++        response.min_protocol = 1;
++        response.max_protocol = 1;
++        response.server_build = "rdsmart-hbbs/0.1.0".to_owned();
++        response.feature_bits = SMART_RELAY_REQUIRED_SESSION_FEATURES;
++        response.server_signature = Bytes::from(vec![0x76; 64]);
++        response
++    }
++
++    fn golden_transcripts() -> Vec<(&'static str, Vec<u8>)> {
++        let fingerprint = [0x60; 32];
++        let register_pk = [0x61; 32];
++        let capability = capability();
++        let punch = connect_offer(false);
++        let relay = connect_offer(true);
++        let warmup = probe_request(SmartRelayProbePurpose::SMART_WARMUP);
++        let session = probe_request(SmartRelayProbePurpose::SMART_SESSION);
++        let report = probe_report(&session);
++        let selection = selection();
++        let response = capability_response();
++
++        vec![
++            (
++                "capability-register-peer",
++                capability_transcript(
++                    CapabilityTranscriptContext {
++                        hbbs_key_fingerprint: &fingerprint,
++                        outer_peer_id: "peer-a",
++                        register_pk_public_key: None,
++                    },
++                    &capability,
++                )
++                .unwrap(),
++            ),
++            (
++                "capability-register-pk",
++                capability_transcript(
++                    CapabilityTranscriptContext {
++                        hbbs_key_fingerprint: &fingerprint,
++                        outer_peer_id: "peer-a",
++                        register_pk_public_key: Some(&register_pk),
++                    },
++                    &capability,
++                )
++                .unwrap(),
++            ),
++            (
++                "connect-punch-false",
++                punch_connect_transcript(
++                    PunchConnectTranscriptContext {
++                        hbbs_key_fingerprint: &fingerprint,
++                        requester_id: "requester-a",
++                        target_id: "target-b",
++                        conn_type: ConnType::TERMINAL,
++                        force_relay: false,
++                    },
++                    &punch,
++                )
++                .unwrap(),
++            ),
++            (
++                "connect-punch-true",
++                punch_connect_transcript(
++                    PunchConnectTranscriptContext {
++                        hbbs_key_fingerprint: &fingerprint,
++                        requester_id: "requester-a",
++                        target_id: "target-b",
++                        conn_type: ConnType::TERMINAL,
++                        force_relay: true,
++                    },
++                    &punch,
++                )
++                .unwrap(),
++            ),
++            (
++                "connect-relay-false",
++                relay_connect_transcript(
++                    RelayConnectTranscriptContext {
++                        hbbs_key_fingerprint: &fingerprint,
++                        requester_id: "requester-a",
++                        target_id: "target-b",
++                        conn_type: ConnType::TERMINAL,
++                        secure: false,
++                        relay_attempt_uuid: "attempt-0001",
++                        relay_server: "1.1.1.1:21117",
++                    },
++                    &relay,
++                )
++                .unwrap(),
++            ),
++            (
++                "connect-relay-true",
++                relay_connect_transcript(
++                    RelayConnectTranscriptContext {
++                        hbbs_key_fingerprint: &fingerprint,
++                        requester_id: "requester-a",
++                        target_id: "target-b",
++                        conn_type: ConnType::TERMINAL,
++                        secure: true,
++                        relay_attempt_uuid: "attempt-0001",
++                        relay_server: "1.1.1.1:21117",
++                    },
++                    &relay,
++                )
++                .unwrap(),
++            ),
++            (
++                "probe-request-warmup",
++                probe_request_transcript(&warmup).unwrap(),
++            ),
++            (
++                "probe-request-session",
++                probe_request_transcript(&session).unwrap(),
++            ),
++            ("probe-report", probe_report_transcript(&report).unwrap()),
++            ("selection", selection_transcript(&selection).unwrap()),
++            (
++                "capability-response",
++                capability_response_transcript(&response).unwrap(),
++            ),
++        ]
++    }
++
++    #[test]
++    fn canonical_lists_are_order_independent_and_context_bits_are_bound() {
++        let mut reversed = candidates();
++        let expected = candidate_set_hash(&reversed).unwrap();
++        reversed.reverse();
++        assert_eq!(candidate_set_hash(&reversed).unwrap(), expected);
++
++        let transcripts = golden_transcripts();
++        assert_ne!(transcripts[2].1, transcripts[3].1);
++        assert_ne!(transcripts[4].1, transcripts[5].1);
++        assert_ne!(transcripts[6].1, transcripts[7].1);
++    }
++
++    #[test]
++    fn validation_rejects_bounds_unknown_enums_private_targets_and_missing_signatures() {
++        assert!(matches!(
++            decode_capability(&vec![0; SMART_RELAY_MAX_WIRE_BYTES + 1]),
++            Err(SmartRelayWireError::MessageTooLarge)
++        ));
++
++        let mut unsigned_capability = capability();
++        unsigned_capability.signature = Bytes::new();
++        assert!(matches!(
++            decode_capability(&unsigned_capability.write_to_bytes().unwrap()),
++            Err(SmartRelayWireError::InvalidLength("capability signature"))
++        ));
++
++        let mut capability = capability();
++        capability
++            .special_fields
++            .mut_unknown_fields()
++            .add_varint(49, 1);
++        assert!(matches!(
++            decode_capability(&capability.write_to_bytes().unwrap()),
++            Err(SmartRelayWireError::UnknownFields("SmartRelayCapability"))
++        ));
++
++        let mut invalid_candidate = candidate(1, [10, 0, 0, 1], 21_117);
++        assert!(matches!(
++            candidate_set_hash(&[invalid_candidate.clone()]),
++            Err(SmartRelayWireError::InvalidValue("candidate IPv4"))
++        ));
++        invalid_candidate.address = Bytes::copy_from_slice(&[1, 1, 1, 1]);
++        invalid_candidate.address_family = EnumOrUnknown::from_i32(99);
++        assert!(matches!(
++            candidate_set_hash(&[invalid_candidate]),
++            Err(SmartRelayWireError::InvalidEnum("address_family"))
++        ));
++
++        let duplicate = candidate(1, [1, 1, 1, 1], 21_117);
++        assert!(matches!(
++            candidate_set_hash(&[duplicate.clone(), duplicate]),
++            Err(SmartRelayWireError::DuplicateCandidate)
++        ));
++        let too_many = (1..=7)
++            .map(|value| candidate(value, [1, 1, 1, value], 21_117))
++            .collect::<Vec<_>>();
++        assert!(matches!(
++            candidate_set_hash(&too_many),
++            Err(SmartRelayWireError::TooManyCandidates)
++        ));
++
++        let mut selection = selection();
++        selection.protocol_version = 2;
++        assert!(matches!(
++            selection_transcript(&selection),
++            Err(SmartRelayWireError::UnsupportedVersion)
++        ));
++    }
++
++    #[test]
++    fn reports_are_bound_to_the_exact_issued_request_and_candidate_set() {
++        let request = probe_request(SmartRelayProbePurpose::SMART_SESSION);
++        let report = probe_report(&request);
++        validate_probe_report_for_request(&report, &request).unwrap();
++
++        let mut wrong_requester = report.clone();
++        wrong_requester.client_id = request.target_id.clone();
++        assert!(matches!(
++            validate_probe_report_for_request(&wrong_requester, &request),
++            Err(SmartRelayWireError::ContextMismatch)
++        ));
++
++        let mut target_request = request.clone();
++        target_request.role = SmartRelayPeerRole::SMART_TARGET.into();
++        let mut target_report = probe_report(&target_request);
++        target_report.client_id = target_request.target_id.clone();
++        validate_probe_report_for_request(&target_report, &target_request).unwrap();
++        target_report.client_id = target_request.requester_id.clone();
++        assert!(matches!(
++            validate_probe_report_for_request(&target_report, &target_request),
++            Err(SmartRelayWireError::ContextMismatch)
++        ));
++
++        let mut anonymous_target_request = target_request.clone();
++        anonymous_target_request.requester_id.clear();
++        let mut anonymous_target_report = probe_report(&anonymous_target_request);
++        anonymous_target_report.client_id = anonymous_target_request.target_id.clone();
++        assert!(matches!(
++            validate_probe_report_for_request(&anonymous_target_report, &anonymous_target_request),
++            Err(SmartRelayWireError::InvalidAscii("requester_id"))
++        ));
++
++        let mut anonymous_selection = selection();
++        anonymous_selection.requester_id.clear();
++        assert!(matches!(
++            selection_transcript(&anonymous_selection),
++            Err(SmartRelayWireError::InvalidAscii("requester_id"))
++        ));
++
++        let mut wrong = report.clone();
++        wrong.role_nonce = Bytes::from(vec![0x99; 32]);
++        assert!(matches!(
++            validate_probe_report_for_request(&wrong, &request),
++            Err(SmartRelayWireError::ContextMismatch)
++        ));
++
++        let mut outside = report;
++        outside.results[0].node_id = Bytes::from(vec![0xee; 16]);
++        assert!(matches!(
++            validate_probe_report_for_request(&outside, &request),
++            Err(SmartRelayWireError::ContextMismatch)
++        ));
++    }
++
++    #[test]
++    fn signatures_round_trip_without_signing_protobuf_serialization() {
++        sodiumoxide::init().unwrap();
++        let (public_key, secret_key) = sign::gen_keypair();
++        for (_, transcript) in golden_transcripts() {
++            let signature = sign_transcript(&transcript, &secret_key);
++            verify_transcript(&transcript, &signature, &public_key).unwrap();
++            let mut tampered = transcript;
++            let last = tampered.last_mut().unwrap();
++            *last ^= 1;
++            assert!(matches!(
++                verify_transcript(&tampered, &signature, &public_key),
++                Err(SmartRelayWireError::InvalidSignature)
++            ));
++        }
++
++        let selection = selection();
++        let canonical = selection_transcript(&selection).unwrap();
++        let protobuf = selection.write_to_bytes().unwrap();
++        let blob = signed_selection_blob(&selection).unwrap();
++        assert_ne!(canonical, protobuf);
++        assert_ne!(blob, protobuf);
++        assert_eq!(
++            u32::from_be_bytes(blob[..4].try_into().unwrap()) as usize,
++            canonical.len()
++        );
++
++        let relay = connect_offer(true);
++        let relay_transcript = relay_connect_transcript(
++            RelayConnectTranscriptContext {
++                hbbs_key_fingerprint: &[0x60; 32],
++                requester_id: "requester-a",
++                target_id: "target-b",
++                conn_type: ConnType::TERMINAL,
++                secure: true,
++                relay_attempt_uuid: "attempt-0001",
++                relay_server: "1.1.1.1:21117",
++            },
++            &relay,
++        )
++        .unwrap();
++        let selection_blob = signed_selection_blob(relay.selection.as_ref().unwrap()).unwrap();
++        let blob_offset = relay_transcript.len() - selection_blob.len();
++        assert_eq!(relay_transcript[blob_offset - 1], 1);
++        assert_eq!(&relay_transcript[blob_offset..], selection_blob.as_slice());
++        assert_eq!(
++            u32::from_be_bytes(
++                relay_transcript[blob_offset..blob_offset + 4]
++                    .try_into()
++                    .unwrap()
++            ) as usize,
++            selection_transcript(relay.selection.as_ref().unwrap())
++                .unwrap()
++                .len()
++        );
++    }
++
++    #[test]
++    fn typed_verifiers_bind_device_server_and_nested_selection_identities() {
++        sodiumoxide::init().unwrap();
++        let (server_public, server_secret) = sign::gen_keypair();
++        let (device_public, device_secret) = sign::gen_keypair();
++        let (wrong_public, _) = sign::gen_keypair();
++        let fingerprint = hbbs_key_fingerprint(server_public.as_ref()).unwrap();
++
++        let capability_context = CapabilityTranscriptContext {
++            hbbs_key_fingerprint: &fingerprint,
++            outer_peer_id: "peer-a",
++            register_pk_public_key: Some(device_public.as_ref()),
++        };
++        let mut capability = capability();
++        capability.signature = Bytes::new();
++        capability.signature = Bytes::copy_from_slice(&sign_transcript(
++            &capability_transcript(capability_context, &capability).unwrap(),
++            &device_secret,
++        ));
++        verify_capability_signature(capability_context, &capability, &device_public).unwrap();
++
++        let punch_context = PunchConnectTranscriptContext {
++            hbbs_key_fingerprint: &fingerprint,
++            requester_id: "requester-a",
++            target_id: "target-b",
++            conn_type: ConnType::TERMINAL,
++            force_relay: true,
++        };
++        let mut punch = connect_offer(false);
++        punch.signature = Bytes::new();
++        punch.signature = Bytes::copy_from_slice(&sign_transcript(
++            &punch_connect_transcript(punch_context, &punch).unwrap(),
++            &device_secret,
++        ));
++        verify_punch_connect_signature(punch_context, &punch, &device_public).unwrap();
++
++        let mut signed_selection = selection();
++        signed_selection.server_signature = Bytes::new();
++        signed_selection.server_signature = Bytes::copy_from_slice(&sign_transcript(
++            &selection_transcript(&signed_selection).unwrap(),
++            &server_secret,
++        ));
++        verify_selection_signature(&signed_selection, &server_public).unwrap();
++
++        let relay_context = RelayConnectTranscriptContext {
++            hbbs_key_fingerprint: &fingerprint,
++            requester_id: "requester-a",
++            target_id: "target-b",
++            conn_type: ConnType::TERMINAL,
++            secure: true,
++            relay_attempt_uuid: "attempt-0001",
++            relay_server: "1.1.1.1:21117",
++        };
++        let mut relay = connect_offer(false);
++        relay.selection = MessageField::some(signed_selection);
++        relay.signature = Bytes::new();
++        relay.signature = Bytes::copy_from_slice(&sign_transcript(
++            &relay_connect_transcript(relay_context, &relay).unwrap(),
++            &device_secret,
++        ));
++        verify_relay_connect_signatures(relay_context, &relay, &device_public, &server_public)
++            .unwrap();
++        assert!(matches!(
++            verify_relay_connect_signatures(relay_context, &relay, &device_public, &wrong_public,),
++            Err(SmartRelayWireError::InvalidSignature)
++        ));
++
++        let mut request = probe_request(SmartRelayProbePurpose::SMART_SESSION);
++        request.server_signature = Bytes::new();
++        request.server_signature = Bytes::copy_from_slice(&sign_transcript(
++            &probe_request_transcript(&request).unwrap(),
++            &server_secret,
++        ));
++        verify_probe_request_signature(&request, &server_public).unwrap();
++
++        let mut report = probe_report(&request);
++        report.client_signature = Bytes::new();
++        report.client_signature = Bytes::copy_from_slice(&sign_transcript(
++            &probe_report_transcript(&report).unwrap(),
++            &device_secret,
++        ));
++        verify_probe_report_signature(&report, &device_public).unwrap();
++        validate_probe_report_for_request(&report, &request).unwrap();
++
++        let mut response = capability_response();
++        response.server_signature = Bytes::new();
++        response.server_signature = Bytes::copy_from_slice(&sign_transcript(
++            &capability_response_transcript(&response).unwrap(),
++            &server_secret,
++        ));
++        verify_capability_response_signature(&response, &server_public).unwrap();
++    }
++
++    #[test]
++    fn every_domain_matches_cross_baseline_golden_hashes_and_signatures() {
++        const PUBLIC_KEY: &str = "14ee944d8e6050eedacb92437b94fae70efbc0eb712f1b84f1476286d54ecd89";
++        const GOLDEN: [(&str, &str, &str); 11] = [
++            (
++                "capability-register-peer",
++                "f4ef7edc5663f2e1464a25a8017cd7fddad25fe63809e703e94a5c34fb06cd63",
++                "619755fb1d0de943e3d57f1a2eef15b3e9e3c92cb672606571bd9d409c8be368a23b1e87b7854359b81981cd952e5a3fda96b32e7c0b6408969d66c5e1a62b04",
++            ),
++            (
++                "capability-register-pk",
++                "122b3e077e88692e2cf1e25c176c0a41ba6f5635e1b3160bdd0fae1f7ce136fd",
++                "abdb05e3fb46b3bc569086afd0bb7a43f37064919e45f1bfd734cbb774cbd9e370ab061ebb398ade4c0a11939e3304c77f79e076225f04b852b9030dad483304",
++            ),
++            (
++                "connect-punch-false",
++                "384922777ce7f91354a0a136b032249279616d447d612bf5555243b21672e48d",
++                "0d9dc5837237e23b7e3da177e032068a8c20a3267e68f2f02a6b6a383c7f3e8f5ae2d97d73443be72b4e4676f3ca0e678610ba2b10c46ab2af76f30a52a14c04",
++            ),
++            (
++                "connect-punch-true",
++                "68ce1bedf197c4152a194d93b3ea9d9208fc1b84eed36c8b972cba733e3006c8",
++                "78d4deeede9d1503a5099d0539ad2f4324ba0e1ccb7187f04b6e92c7d015bb8cefa60e0f0da7b0ff03ad5ba40fce7d00a2ffe707ce0841008d1425501da34d02",
++            ),
++            (
++                "connect-relay-false",
++                "022aa70d85d94e8ed3253d3edc112b8c7671fce7632c3e1b67f30cfa13d010dd",
++                "3493140bf1769348d4798f9782c682db97e2f143e27ca6b6171b518fe799526bdbe2b69efe30608d8132b3601c281ae192ebd76c26252b71814f02ff847f2d01",
++            ),
++            (
++                "connect-relay-true",
++                "264fde8227391198a96408323d171ab5a057beaf1292cf83c5cd29af6b511886",
++                "11070120e31a450f4155106ed163fa401a67818895dcff24fdb60c6c9b9910058e96ee6b5bcead579d9408603133b127dd6daf835dda85d5bc102868c857d900",
++            ),
++            (
++                "probe-request-warmup",
++                "ef9e2012d21c999389f162783c61e40f6eacb10e883926fa89c5a529b68e1a8b",
++                "af5f6a4570d4f2ef629b9529896ef7d24d05ece280acd91effec2376a8556dfc7e88175fa774fed6fd0c30511d7e967f0593e6ffe4adb68f4ae697c47cfa7904",
++            ),
++            (
++                "probe-request-session",
++                "5d7f20e0c69c75de8cfa17eed2960fe3d3ffe5d2939185b10c1a7d5f001562d4",
++                "856c421306e5ff4a60f32efd5efabb548db2823a1a82eed05b1196b3d3e8c24efcc579a36a24bf4b4223393a07fdcf0414a33cbd140f59af821d2b66532db90a",
++            ),
++            (
++                "probe-report",
++                "29502ce6e99be82084ad7a71eebcb8d0b99fd40a63470a4679c85b3ee131b9c9",
++                "a9f6c27a38759a320f9c82d02a50d6bb8e8510350c2c6987bbcefee1bbfdcb8fb4228c701f74dc1d2773e847f2f414100a46a9eaf977df28476cfa03fb04970f",
++            ),
++            (
++                "selection",
++                "fd6b5f45e0eb2bf7df1c365f3905e4108eeb320f06c6fd48aab9b38410897010",
++                "0b24ced34e1f91508dfae3fcb12ed4f2f0aaa16fb51c73d8ee4eaa66489f0abf7c39a4c83d0027eaae101d45fcea06b5a3d108127eef0746a7bae337952fd20b",
++            ),
++            (
++                "capability-response",
++                "bf6dca529be28d00aa7480724382e3501c6cf742c932d803fba6423ec83d6286",
++                "ad1a6f615d74c51ae35228395c12706c4f69491e9f3721c9822b81fcfbf260fe51e3beb1c627da0982bdcc3144a3d9bbff5a70ab741c986d4e99f769b0c9a50c",
++            ),
++        ];
++
++        sodiumoxide::init().unwrap();
++        let public_key = sign::PublicKey::from_slice(&decode_hex::<32>(PUBLIC_KEY)).unwrap();
++        for ((name, transcript), (expected_name, expected_hash, expected_signature)) in
++            golden_transcripts().into_iter().zip(GOLDEN)
++        {
++            assert_eq!(name, expected_name);
++            let hash: [u8; 32] = Sha256::digest(&transcript).into();
++            assert_eq!(hash, decode_hex::<32>(expected_hash), "{} hash", name);
++            verify_transcript(
++                &transcript,
++                &decode_hex::<64>(expected_signature),
++                &public_key,
++            )
++            .unwrap();
++        }
++    }
++
++    fn decode_hex<const N: usize>(value: &str) -> [u8; N] {
++        assert_eq!(value.len(), N * 2);
++        let mut result = [0; N];
++        for (index, output) in result.iter_mut().enumerate() {
++            *output = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).unwrap();
++        }
++        result
++    }
++}
+diff --git a/src/stream.rs b/src/stream.rs
+index a8e6b6c2d1b4dc73175ec573649277af3d3227e4..2d41d857a83b47785c18ed7289eac18dcab64dfb 100644
+--- a/src/stream.rs
++++ b/src/stream.rs
+@@ -74,6 +74,14 @@ impl Stream {
+         }
+     }
+
++    #[inline]
++    pub fn has_strict_websocket_tls_handshake(&self) -> bool {
++        match self {
++            Self::WebSocket(stream) => stream.has_strict_tls_handshake(),
++            _ => false,
++        }
++    }
++
+     #[inline]
+     pub async fn next_timeout(
+         &mut self,
+diff --git a/src/websocket.rs b/src/websocket.rs
+index 7bf21084090c0e85a6bfa950260c1955a56e324d..5f0a21246cbb8c18bfeaf6671883208678e33846 100644
+--- a/src/websocket.rs
++++ b/src/websocket.rs
+@@ -1,6 +1,7 @@
+ use crate::{
+     config::{
+-        keys::OPTION_RELAY_SERVER, use_ws, Config, Socks5Server, RELAY_PORT, RENDEZVOUS_PORT,
++        keys::{OPTION_API_SERVER, OPTION_RELAY_SERVER},
++        use_ws, Config, Socks5Server, HARD_SETTINGS, RELAY_PORT, RENDEZVOUS_PORT,
+     },
+     protobuf::Message,
+     socket_client::split_host_port,
+@@ -33,9 +34,40 @@ pub struct WsFramedStream {
+     addr: SocketAddr,
+     encrypt: Option<Encrypt>,
+     send_timeout: u64,
++    strict_tls_handshake: bool,
+ }
+
+ impl WsFramedStream {
++    fn from_connected_websocket(
++        stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
++        send_timeout: u64,
++        strict_tls_handshake: bool,
++    ) -> ResultType<Self> {
++        let addr = match stream.get_ref() {
++            MaybeTlsStream::Plain(tcp) => tcp.peer_addr()?,
++            MaybeTlsStream::NativeTls(tls) => tls.get_ref().get_ref().get_ref().peer_addr()?,
++            MaybeTlsStream::Rustls(tls) => tls.get_ref().0.peer_addr()?,
++            _ => return Err(Error::new(ErrorKind::Other, "Unsupported stream type").into()),
++        };
++        Ok(Self {
++            stream,
++            addr,
++            encrypt: None,
++            send_timeout,
++            strict_tls_handshake,
++        })
++    }
++
++    fn strict_tls_handshake_verdict(
++        actual_tls_stream: bool,
++        tls_type: TlsType,
++        danger_accept_invalid_cert: bool,
++    ) -> bool {
++        actual_tls_stream
++            && matches!(tls_type, TlsType::NativeTls | TlsType::Rustls)
++            && !danger_accept_invalid_cert
++    }
++
+     #[inline]
+     fn get_connector(
+         tls_type: &TlsType,
+@@ -68,7 +100,7 @@ impl WsFramedStream {
+     async fn connect(
+         url: &str,
+         ms_timeout: u64,
+-    ) -> ResultType<WebSocketStream<MaybeTlsStream<TcpStream>>> {
++    ) -> ResultType<(WebSocketStream<MaybeTlsStream<TcpStream>>, bool)> {
+         // to-do: websocket proxy.
+
+         let tls_type = get_cached_tls_type(url);
+@@ -94,7 +126,7 @@ impl WsFramedStream {
+         is_tls_type_cached: bool,
+         danger_accept_invalid_cert: Option<bool>,
+         original_danger_accept_invalid_certs: Option<bool>,
+-    ) -> ResultType<WebSocketStream<MaybeTlsStream<TcpStream>>> {
++    ) -> ResultType<(WebSocketStream<MaybeTlsStream<TcpStream>>, bool)> {
+         let ws_config = None;
+         let disable_nagle = false;
+         let request = url
+@@ -109,8 +141,20 @@ impl WsFramedStream {
+         .await?
+         {
+             Ok((ws_stream, _)) => {
+-                upsert_tls_cache(url, tls_type, danger_accept_invalid_cert.unwrap_or(false));
+-                Ok(ws_stream)
++                let danger_accept_invalid_cert = danger_accept_invalid_cert.unwrap_or(false);
++                upsert_tls_cache(url, tls_type, danger_accept_invalid_cert);
++                let actual_tls_stream = matches!(
++                    ws_stream.get_ref(),
++                    MaybeTlsStream::NativeTls(_) | MaybeTlsStream::Rustls(_)
++                );
++                Ok((
++                    ws_stream,
++                    Self::strict_tls_handshake_verdict(
++                        actual_tls_stream,
++                        tls_type,
++                        danger_accept_invalid_cert,
++                    ),
++                ))
+             }
+             Err(e) => match (tls_type, is_tls_type_cached, danger_accept_invalid_cert) {
+                 (TlsType::Rustls, _, None) => {
+@@ -188,22 +232,39 @@ impl WsFramedStream {
+         _proxy_conf: Option<&Socks5Server>,
+         ms_timeout: u64,
+     ) -> ResultType<Self> {
+-        let stream = Self::connect(url.as_ref(), ms_timeout).await?;
+-        let addr = match stream.get_ref() {
+-            MaybeTlsStream::Plain(tcp) => tcp.peer_addr()?,
+-            MaybeTlsStream::NativeTls(tls) => tls.get_ref().get_ref().get_ref().peer_addr()?,
+-            MaybeTlsStream::Rustls(tls) => tls.get_ref().0.peer_addr()?,
+-            _ => return Err(Error::new(ErrorKind::Other, "Unsupported stream type").into()),
+-        };
+-
+-        let ws = Self {
+-            stream,
+-            addr,
+-            encrypt: None,
+-            send_timeout: ms_timeout,
+-        };
++        let (stream, strict_tls_handshake) = Self::connect(url.as_ref(), ms_timeout).await?;
++        Self::from_connected_websocket(stream, ms_timeout, strict_tls_handshake)
++    }
+
+-        Ok(ws)
++    #[cfg(feature = "test-ws-tls")]
++    #[doc(hidden)]
++    pub async fn connect_with_test_rustls_config<T: AsRef<str>>(
++        url: T,
++        client_config: tokio_rustls::rustls::ClientConfig,
++        danger_accept_invalid_cert: bool,
++        ms_timeout: u64,
++    ) -> ResultType<Self> {
++        let request = url
++            .as_ref()
++            .into_client_request()
++            .map_err(|e| Error::new(ErrorKind::Other, e))?;
++        let (stream, _) = timeout(
++            Duration::from_millis(ms_timeout),
++            connect_async_tls_with_config(
++                request,
++                None,
++                false,
++                Some(Connector::Rustls(Arc::new(client_config))),
++            ),
++        )
++        .await??;
++        let actual_tls_stream = matches!(stream.get_ref(), MaybeTlsStream::Rustls(_));
++        let strict_tls_handshake = Self::strict_tls_handshake_verdict(
++            actual_tls_stream,
++            TlsType::Rustls,
++            danger_accept_invalid_cert,
++        );
++        Self::from_connected_websocket(stream, ms_timeout, strict_tls_handshake)
+     }
+
+     #[inline]
+@@ -222,6 +283,7 @@ impl WsFramedStream {
+             addr,
+             encrypt: None,
+             send_timeout: 0,
++            strict_tls_handshake: false,
+         })
+     }
+
+@@ -245,6 +307,11 @@ impl WsFramedStream {
+         self.encrypt.is_some()
+     }
+
++    #[inline]
++    pub fn has_strict_tls_handshake(&self) -> bool {
++        self.strict_tls_handshake
++    }
++
+     #[inline]
+     pub async fn send(&mut self, msg: &impl Message) -> ResultType<()> {
+         self.send_raw(msg.write_to_bytes()?).await
+@@ -326,6 +393,19 @@ pub fn is_ws_endpoint(endpoint: &str) -> bool {
+     endpoint.starts_with("ws://") || endpoint.starts_with("wss://")
+ }
+
++fn configured_api_server_for_websocket() -> String {
++    let configured = Config::get_option(OPTION_API_SERVER);
++    if !configured.is_empty() {
++        return configured;
++    }
++    HARD_SETTINGS
++        .read()
++        .unwrap()
++        .get(OPTION_API_SERVER)
++        .cloned()
++        .unwrap_or_default()
++}
++
+ /**
+  * Core function to convert an endpoint to WebSocket format
+  *
+@@ -388,7 +468,7 @@ pub fn check_ws(endpoint: &str) -> String {
+         (format!("{}{}", endpoint_host, domain_path), true)
+     };
+     let protocol = if is_domain {
+-        let api_server = Config::get_option("api-server");
++        let api_server = configured_api_server_for_websocket();
+         if api_server.starts_with("https") {
+             "wss"
+         } else {
+@@ -403,7 +483,106 @@ pub fn check_ws(endpoint: &str) -> String {
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+-    use crate::config::{keys, Config};
++    use crate::config::{keys, Config, OVERWRITE_SETTINGS};
++
++    struct HardApiServerGuard(Option<String>);
++    struct OverrideApiServerGuard(Option<String>);
++
++    impl HardApiServerGuard {
++        fn replace(value: &str) -> Self {
++            let original = HARD_SETTINGS
++                .write()
++                .unwrap()
++                .insert(OPTION_API_SERVER.to_string(), value.to_string());
++            Self(original)
++        }
++    }
++
++    impl Drop for HardApiServerGuard {
++        fn drop(&mut self) {
++            let mut hard_settings = HARD_SETTINGS.write().unwrap();
++            if let Some(original) = self.0.take() {
++                hard_settings.insert(OPTION_API_SERVER.to_string(), original);
++            } else {
++                hard_settings.remove(OPTION_API_SERVER);
++            }
++        }
++    }
++
++    impl OverrideApiServerGuard {
++        fn force_empty() -> Self {
++            let original = OVERWRITE_SETTINGS
++                .write()
++                .unwrap()
++                .insert(OPTION_API_SERVER.to_string(), String::new());
++            Self(original)
++        }
++    }
++
++    impl Drop for OverrideApiServerGuard {
++        fn drop(&mut self) {
++            let mut overwrite_settings = OVERWRITE_SETTINGS.write().unwrap();
++            if let Some(original) = self.0.take() {
++                overwrite_settings.insert(OPTION_API_SERVER.to_string(), original);
++            } else {
++                overwrite_settings.remove(OPTION_API_SERVER);
++            }
++        }
++    }
++
++    #[test]
++    fn hard_api_server_is_used_when_config_api_is_empty() {
++        let _configured_api_server = OverrideApiServerGuard::force_empty();
++        let _hard_api_server = HardApiServerGuard::replace("https://api.rustdesk.com");
++        assert_eq!(
++            configured_api_server_for_websocket(),
++            "https://api.rustdesk.com"
++        );
++    }
++
++    #[test]
++    fn strict_tls_verdict_rejects_plain_and_accept_invalid_handshakes() {
++        assert!(WsFramedStream::strict_tls_handshake_verdict(
++            true,
++            TlsType::Rustls,
++            false
++        ));
++        assert!(WsFramedStream::strict_tls_handshake_verdict(
++            true,
++            TlsType::NativeTls,
++            false
++        ));
++        assert!(!WsFramedStream::strict_tls_handshake_verdict(
++            false,
++            TlsType::Rustls,
++            false
++        ));
++        assert!(!WsFramedStream::strict_tls_handshake_verdict(
++            true,
++            TlsType::Plain,
++            false
++        ));
++        assert!(!WsFramedStream::strict_tls_handshake_verdict(
++            true,
++            TlsType::Rustls,
++            true
++        ));
++    }
++
++    #[tokio::test]
++    async fn websocket_from_plain_tcp_cannot_claim_a_strict_tls_handshake() {
++        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
++            .await
++            .unwrap();
++        let server_addr = listener.local_addr().unwrap();
++        let client = TcpStream::connect(server_addr).await.unwrap();
++        let client_addr = client.local_addr().unwrap();
++        let (_server, _) = listener.accept().await.unwrap();
++        let stream = WsFramedStream::from_tcp_stream(client, client_addr)
++            .await
++            .unwrap();
++        assert!(!stream.has_strict_tls_handshake());
++    }
+
+     #[test]
+     fn test_check_ws() {

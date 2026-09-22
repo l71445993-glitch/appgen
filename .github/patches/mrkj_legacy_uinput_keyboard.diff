@@ -1,0 +1,608 @@
+diff --git a/src/server/uinput.rs b/src/server/uinput.rs
+index 47f33fc..b4a7cd2 100644
+--- a/src/server/uinput.rs
++++ b/src/server/uinput.rs
+@@ -1,9 +1,5 @@
+ use crate::ipc::{self, new_listener, Connection, Data, DataKeyboard, DataMouse};
+ use enigo::{Key, KeyboardControllable, MouseButton, MouseControllable};
+-use evdev::{
+-    uinput::{VirtualDevice, VirtualDeviceBuilder},
+-    AttributeSet, EventType, InputEvent,
+-};
+ use hbb_common::{
+     allow_err, bail, log,
+     tokio::{self, runtime::Runtime},
+@@ -20,52 +16,112 @@ pub mod client {
+     use super::*;
+ 
+     pub struct UInputKeyboard {
+-        conn: Connection,
++        conn: Option<Connection>,
+         rt: Runtime,
+     }
+ 
+     impl UInputKeyboard {
+         pub async fn new() -> ResultType<Self> {
+-            let conn = ipc::connect(IPC_CONN_TIMEOUT, IPC_POSTFIX_KEYBOARD).await?;
+             let rt = Runtime::new()?;
++            let conn = match ipc::connect(IPC_CONN_TIMEOUT, IPC_POSTFIX_KEYBOARD).await {
++                Ok(conn) => Some(conn),
++                Err(e) => {
++                    log::warn!("UInput keyboard ipc unavailable, will retry lazily: {}", e);
++                    None
++                }
++            };
+             Ok(Self { conn, rt })
+         }
+ 
++        fn ensure_conn(&mut self) -> ResultType<()> {
++            if self.conn.is_none() {
++                self.conn = Some(
++                    self.rt
++                        .block_on(ipc::connect(IPC_CONN_TIMEOUT, IPC_POSTFIX_KEYBOARD))?,
++                );
++                log::info!("UInput keyboard ipc reconnected");
++            }
++            Ok(())
++        }
++
+         fn send(&mut self, data: Data) -> ResultType<()> {
+-            self.rt.block_on(self.conn.send(&data))
++            for attempt in 0..2 {
++                self.ensure_conn()?;
++                let result = {
++                    let conn = self.conn.as_mut().unwrap();
++                    self.rt.block_on(conn.send(&data))
++                };
++                match result {
++                    Ok(()) => return Ok(()),
++                    Err(e) => {
++                        self.conn = None;
++                        if attempt == 0 {
++                            log::warn!("UInput keyboard ipc send failed, retrying: {}", e);
++                            continue;
++                        }
++                        return Err(e);
++                    }
++                }
++            }
++            Ok(())
+         }
+ 
+         fn send_get_key_state(&mut self, data: Data) -> ResultType<bool> {
+-            self.rt.block_on(self.conn.send(&data))?;
+-
+-            match self
+-                .rt
+-                .block_on(self.conn.next_timeout(IPC_REQUEST_TIMEOUT))
+-            {
+-                Ok(Some(Data::KeyboardResponse(ipc::DataKeyboardResponse::GetKeyState(state)))) => {
+-                    Ok(state)
+-                }
+-                Ok(Some(resp)) => {
+-                    // FATAL error!!!
+-                    bail!(
+-                        "FATAL error, wait keyboard result other response: {:?}",
+-                        &resp
+-                    );
+-                }
+-                Ok(None) => {
+-                    // FATAL error!!!
+-                    // Maybe wait later
+-                    bail!("FATAL error, wait keyboard result, receive None",);
++            for attempt in 0..2 {
++                self.ensure_conn()?;
++                let send_result = {
++                    let conn = self.conn.as_mut().unwrap();
++                    self.rt.block_on(conn.send(&data))
++                };
++                if let Err(e) = send_result {
++                    self.conn = None;
++                    if attempt == 0 {
++                        log::warn!("UInput keyboard ipc key-state send failed, retrying: {}", e);
++                        continue;
++                    }
++                    return Err(e);
+                 }
+-                Err(e) => {
+-                    // FATAL error!!!
+-                    bail!(
+-                        "FATAL error, wait keyboard result timeout {}, {}",
+-                        &e,
+-                        IPC_REQUEST_TIMEOUT
+-                    );
++
++                let response = {
++                    let conn = self.conn.as_mut().unwrap();
++                    self.rt.block_on(conn.next_timeout(IPC_REQUEST_TIMEOUT))
++                };
++                match response {
++                    Ok(Some(Data::KeyboardResponse(ipc::DataKeyboardResponse::GetKeyState(
++                        state,
++                    )))) => return Ok(state),
++                    Ok(Some(resp)) => {
++                        self.conn = None;
++                        bail!(
++                            "FATAL error, wait keyboard result other response: {:?}",
++                            &resp
++                        );
++                    }
++                    Ok(None) => {
++                        self.conn = None;
++                        if attempt == 0 {
++                            log::warn!("UInput keyboard ipc closed during key-state request");
++                            continue;
++                        }
++                        bail!("FATAL error, wait keyboard result, receive None",);
++                    }
++                    Err(e) => {
++                        self.conn = None;
++                        if attempt == 0 {
++                            log::warn!(
++                                "UInput keyboard ipc key-state wait failed, retrying: {}",
++                                e
++                            );
++                            continue;
++                        }
++                        return Err(e);
++                    }
+                 }
+             }
++            bail!(
++                "FATAL error, wait keyboard result timeout {}",
++                IPC_REQUEST_TIMEOUT
++            );
+         }
+     }
+ 
+@@ -107,7 +163,7 @@ pub mod client {
+     }
+ 
+     pub struct UInputMouse {
+-        conn: Connection,
++        conn: Option<Connection>,
+         rt: Runtime,
+         pointer: Option<super::mouce::XcbPointer>,
+         x: i32,
+@@ -121,8 +177,14 @@ pub mod client {
+ 
+     impl UInputMouse {
+         pub async fn new(minx: i32, maxx: i32, miny: i32, maxy: i32) -> ResultType<Self> {
+-            let conn = ipc::connect(IPC_CONN_TIMEOUT, IPC_POSTFIX_MOUSE).await?;
+             let rt = Runtime::new()?;
++            let conn = match ipc::connect(IPC_CONN_TIMEOUT, IPC_POSTFIX_MOUSE).await {
++                Ok(conn) => Some(conn),
++                Err(e) => {
++                    log::warn!("UInput mouse ipc unavailable, will retry lazily: {}", e);
++                    None
++                }
++            };
+             Ok(Self {
+                 conn,
+                 rt,
+@@ -137,8 +199,37 @@ pub mod client {
+             })
+         }
+ 
++        fn ensure_conn(&mut self) -> ResultType<()> {
++            if self.conn.is_none() {
++                self.conn = Some(
++                    self.rt
++                        .block_on(ipc::connect(IPC_CONN_TIMEOUT, IPC_POSTFIX_MOUSE))?,
++                );
++                log::info!("UInput mouse ipc reconnected");
++            }
++            Ok(())
++        }
++
+         fn send(&mut self, data: Data) -> ResultType<()> {
+-            self.rt.block_on(self.conn.send(&data))
++            for attempt in 0..2 {
++                self.ensure_conn()?;
++                let result = {
++                    let conn = self.conn.as_mut().unwrap();
++                    self.rt.block_on(conn.send(&data))
++                };
++                match result {
++                    Ok(()) => return Ok(()),
++                    Err(e) => {
++                        self.conn = None;
++                        if attempt == 0 {
++                            log::warn!("UInput mouse ipc send failed, retrying: {}", e);
++                            continue;
++                        }
++                        return Err(e);
++                    }
++                }
++            }
++            Ok(())
+         }
+ 
+         pub fn send_refresh(&mut self) -> ResultType<()> {
+@@ -424,28 +515,8 @@ pub mod service {
+         static ref RESOLUTION: Mutex<((i32, i32), (i32, i32))> = Mutex::new(((0, 0), (0, 0)));
+     }
+ 
+-    fn create_uinput_keyboard() -> ResultType<VirtualDevice> {
+-        // TODO: ensure keys here
+-        let mut keys = AttributeSet::<evdev::Key>::new();
+-        for i in evdev::Key::KEY_ESC.code()..(evdev::Key::BTN_TRIGGER_HAPPY40.code() + 1) {
+-            let key = evdev::Key::new(i);
+-            if !format!("{:?}", &key).contains("unknown key") {
+-                keys.insert(key);
+-            }
+-        }
+-        let mut leds = AttributeSet::<evdev::LedType>::new();
+-        leds.insert(evdev::LedType::LED_NUML);
+-        leds.insert(evdev::LedType::LED_CAPSL);
+-        leds.insert(evdev::LedType::LED_SCROLLL);
+-        let mut miscs = AttributeSet::<evdev::MiscType>::new();
+-        miscs.insert(evdev::MiscType::MSC_SCAN);
+-        let keyboard = VirtualDeviceBuilder::new()?
+-            .name("RustDesk UInput Keyboard")
+-            .with_keys(&keys)?
+-            .with_leds(&leds)?
+-            .with_miscs(&miscs)?
+-            .build()?;
+-        Ok(keyboard)
++    fn create_uinput_keyboard() -> ResultType<mouce::UInputKeyboardManager> {
++        Ok(mouce::UInputKeyboardManager::new()?)
+     }
+ 
+     pub fn map_key(key: &enigo::Key) -> ResultType<(evdev::Key, bool)> {
+@@ -472,26 +543,33 @@ pub mod service {
+         bail!("Failed to map key {:?}", &key);
+     }
+ 
+-    fn emit_key(keyboard: &mut VirtualDevice, key: evdev::Key, down: bool) {
+-        let event = InputEvent::new(EventType::KEY, key.code(), if down { 1 } else { 0 });
+-        allow_err!(keyboard.emit(&[event]));
++    fn emit_key(keyboard: &mut mouce::UInputKeyboardManager, key: evdev::Key, down: bool) {
++        allow_err!(keyboard.set_key(key.code() as i32, down));
+     }
+ 
+-    fn key_down_mapped(keyboard: &mut VirtualDevice, key: evdev::Key, is_shift: bool) {
++    fn key_down_mapped(
++        keyboard: &mut mouce::UInputKeyboardManager,
++        key: evdev::Key,
++        is_shift: bool,
++    ) {
+         if is_shift {
+             emit_key(keyboard, evdev::Key::KEY_LEFTSHIFT, true);
+         }
+         emit_key(keyboard, key, true);
+     }
+ 
+-    fn key_up_mapped(keyboard: &mut VirtualDevice, key: evdev::Key, is_shift: bool) {
++    fn key_up_mapped(keyboard: &mut mouce::UInputKeyboardManager, key: evdev::Key, is_shift: bool) {
+         emit_key(keyboard, key, false);
+         if is_shift {
+             emit_key(keyboard, evdev::Key::KEY_LEFTSHIFT, false);
+         }
+     }
+ 
+-    fn key_click_mapped(keyboard: &mut VirtualDevice, key: evdev::Key, is_shift: bool) {
++    fn key_click_mapped(
++        keyboard: &mut mouce::UInputKeyboardManager,
++        key: evdev::Key,
++        is_shift: bool,
++    ) {
+         if is_shift {
+             emit_key(keyboard, evdev::Key::KEY_LEFTSHIFT, true);
+         }
+@@ -502,7 +580,7 @@ pub mod service {
+         }
+     }
+ 
+-    fn type_sequence(keyboard: &mut VirtualDevice, seq: &str) {
++    fn type_sequence(keyboard: &mut mouce::UInputKeyboardManager, seq: &str) {
+         for chr in seq.chars() {
+             let key = enigo::Key::Layout(chr);
+             match map_key(&key) {
+@@ -518,7 +596,7 @@ pub mod service {
+ 
+     async fn handle_keyboard(
+         stream: &mut Connection,
+-        keyboard: &mut VirtualDevice,
++        keyboard: &mut mouce::UInputKeyboardManager,
+         data: &DataKeyboard,
+     ) {
+         log::trace!("handle_keyboard {:?}", &data);
+@@ -527,12 +605,14 @@ pub mod service {
+                 type_sequence(keyboard, seq);
+             }
+             DataKeyboard::KeyDown(enigo::Key::Raw(code)) => {
+-                let down_event = InputEvent::new(EventType::KEY, *code - 8, 1);
+-                allow_err!(keyboard.emit(&[down_event]));
++                if let Some(code) = mouce::xorg_raw_to_evdev_code(*code) {
++                    allow_err!(keyboard.set_key(code, true));
++                }
+             }
+             DataKeyboard::KeyUp(enigo::Key::Raw(code)) => {
+-                let up_event = InputEvent::new(EventType::KEY, *code - 8, 0);
+-                allow_err!(keyboard.emit(&[up_event]));
++                if let Some(code) = mouce::xorg_raw_to_evdev_code(*code) {
++                    allow_err!(keyboard.set_key(code, false));
++                }
+             }
+             DataKeyboard::KeyDown(key) => {
+                 if let Ok((k, is_shift)) = map_key(key) {
+@@ -551,46 +631,40 @@ pub mod service {
+             }
+             DataKeyboard::GetKeyState(key) => {
+                 let key_state = if enigo::Key::CapsLock == *key {
+-                    match keyboard.get_led_state() {
+-                        Ok(leds) => leds.contains(evdev::LedType::LED_CAPSL),
+-                        Err(_e) => {
+-                            // log::debug!("Failed to get led state {}", &_e);
+-                            false
+-                        }
+-                    }
++                    keyboard.caps_lock_state()
+                 } else if enigo::Key::NumLock == *key {
+-                    match keyboard.get_led_state() {
+-                        Ok(leds) => leds.contains(evdev::LedType::LED_NUML),
+-                        Err(_e) => {
+-                            // log::debug!("Failed to get led state {}", &_e);
+-                            false
+-                        }
+-                    }
++                    keyboard.num_lock_state()
+                 } else {
+-                    match keyboard.get_key_state() {
+-                        Ok(keys) => match key {
+-                            enigo::Key::Shift => {
+-                                keys.contains(evdev::Key::KEY_LEFTSHIFT)
+-                                    || keys.contains(evdev::Key::KEY_RIGHTSHIFT)
+-                            }
+-                            enigo::Key::Control => {
+-                                keys.contains(evdev::Key::KEY_LEFTCTRL)
+-                                    || keys.contains(evdev::Key::KEY_RIGHTCTRL)
+-                            }
+-                            enigo::Key::Alt => {
+-                                keys.contains(evdev::Key::KEY_LEFTALT)
+-                                    || keys.contains(evdev::Key::KEY_RIGHTALT)
+-                            }
+-                            enigo::Key::Meta => {
+-                                keys.contains(evdev::Key::KEY_LEFTMETA)
+-                                    || keys.contains(evdev::Key::KEY_RIGHTMETA)
+-                            }
+-                            _ => false,
+-                        },
+-                        Err(_e) => {
+-                            // log::debug!("Failed to get key state: {}", &_e);
+-                            false
++                    match key {
++                        enigo::Key::Shift => {
++                            keyboard.is_key_pressed(evdev::Key::KEY_LEFTSHIFT.code() as i32)
++                                || keyboard.is_key_pressed(evdev::Key::KEY_RIGHTSHIFT.code() as i32)
+                         }
++                        enigo::Key::RightShift => {
++                            keyboard.is_key_pressed(evdev::Key::KEY_RIGHTSHIFT.code() as i32)
++                        }
++                        enigo::Key::Control => {
++                            keyboard.is_key_pressed(evdev::Key::KEY_LEFTCTRL.code() as i32)
++                                || keyboard.is_key_pressed(evdev::Key::KEY_RIGHTCTRL.code() as i32)
++                        }
++                        enigo::Key::RightControl => {
++                            keyboard.is_key_pressed(evdev::Key::KEY_RIGHTCTRL.code() as i32)
++                        }
++                        enigo::Key::Alt => {
++                            keyboard.is_key_pressed(evdev::Key::KEY_LEFTALT.code() as i32)
++                                || keyboard.is_key_pressed(evdev::Key::KEY_RIGHTALT.code() as i32)
++                        }
++                        enigo::Key::RightAlt => {
++                            keyboard.is_key_pressed(evdev::Key::KEY_RIGHTALT.code() as i32)
++                        }
++                        enigo::Key::Meta => {
++                            keyboard.is_key_pressed(evdev::Key::KEY_LEFTMETA.code() as i32)
++                                || keyboard.is_key_pressed(evdev::Key::KEY_RIGHTMETA.code() as i32)
++                        }
++                        enigo::Key::RWin => {
++                            keyboard.is_key_pressed(evdev::Key::KEY_RIGHTMETA.code() as i32)
++                        }
++                        _ => false,
+                     }
+                 };
+                 ipc_send_data(
+@@ -1149,15 +1223,189 @@ mod mouce {
+             .unwrap_or(true)
+     }
+ 
+-    fn device_name() -> [c_char; UINPUT_MAX_NAME_SIZE] {
++    fn make_device_name(device_bytes: &[u8]) -> [c_char; UINPUT_MAX_NAME_SIZE] {
+         let mut name = [0 as c_char; UINPUT_MAX_NAME_SIZE];
+-        let device_bytes = b"RustDesk absolute mouse";
+         for (dst, src) in name.iter_mut().zip(device_bytes.iter()) {
+             *dst = *src as c_char;
+         }
+         name
+     }
+ 
++    fn mouse_device_name() -> [c_char; UINPUT_MAX_NAME_SIZE] {
++        make_device_name(b"RustDesk absolute mouse")
++    }
++
++    fn keyboard_device_name() -> [c_char; UINPUT_MAX_NAME_SIZE] {
++        make_device_name(b"RustDesk uinput keyboard")
++    }
++
++    pub(super) fn xorg_raw_to_evdev_code(raw: u16) -> Option<c_int> {
++        raw.checked_sub(8).and_then(|code| {
++            if code as usize <= KEY_MAX {
++                Some(code as c_int)
++            } else {
++                None
++            }
++        })
++    }
++
++    const KEY_ESC: c_int = 1;
++    const KEY_CAPSLOCK: c_int = 58;
++    const KEY_NUMLOCK: c_int = 69;
++    const KEY_MICMUTE: c_int = 248;
++    const KEY_MAX: usize = 0x2ff;
++    const KEY_CNT: usize = KEY_MAX + 1;
++
++    pub struct UInputKeyboardManager {
++        uinput_file: File,
++        pressed: Vec<bool>,
++        caps_lock: bool,
++        num_lock: bool,
++    }
++
++    impl UInputKeyboardManager {
++        pub fn new() -> Result<Self> {
++            let manager = UInputKeyboardManager {
++                uinput_file: File::options()
++                    .write(true)
++                    .custom_flags(O_NONBLOCK)
++                    .open("/dev/uinput")?,
++                pressed: vec![false; KEY_CNT],
++                caps_lock: false,
++                num_lock: false,
++            };
++            let fd = manager.uinput_file.as_raw_fd();
++            unsafe {
++                ioctl(fd, UI_SET_EVBIT, EV_KEY);
++                for key in KEY_ESC..=KEY_MICMUTE {
++                    ioctl(fd, UI_SET_KEYBIT, key);
++                }
++            }
++
++            manager.setup_device(fd)?;
++
++            // Give userspace time to discover the new input node before events arrive.
++            thread::sleep(Duration::from_millis(300));
++
++            Ok(manager)
++        }
++
++        fn setup_device(&self, fd: c_int) -> Result<()> {
++            let name = keyboard_device_name();
++            let id = InputId {
++                bustype: BUS_USB,
++                vendor: 0x5255,
++                product: 0x4b42,
++                version: 1,
++            };
++
++            let usetup = UInputSetup {
++                id,
++                name,
++                ff_effects_max: 0,
++            };
++
++            let modern_ok = unsafe { ioctl(fd, UI_DEV_SETUP, &usetup) } >= 0;
++            if !modern_ok {
++                let legacy = UinputUserDev {
++                    name,
++                    id,
++                    ff_effects_max: 0,
++                    absmax: [0; ABS_CNT],
++                    absmin: [0; ABS_CNT],
++                    absfuzz: [0; ABS_CNT],
++                    absflat: [0; ABS_CNT],
++                };
++                self.write_raw(&legacy)?;
++            }
++
++            if unsafe { ioctl(fd, UI_DEV_CREATE) } < 0 {
++                return Err(Error::last_os_error());
++            }
++            Ok(())
++        }
++
++        fn emit(&self, r#type: c_int, code: c_int, value: c_int) -> Result<()> {
++            let event = InputEvent {
++                time: TimeVal {
++                    tv_sec: 0,
++                    tv_usec: 0,
++                },
++                r#type: r#type as c_ushort,
++                code: code as c_ushort,
++                value,
++            };
++            self.write_raw(&event)
++        }
++
++        fn write_raw<T>(&self, value: &T) -> Result<()> {
++            let fd = self.uinput_file.as_raw_fd();
++
++            unsafe {
++                let count = size_of::<T>();
++                let written_bytes = write(fd, value as *const T as *const c_void, count);
++                if written_bytes == -1 || written_bytes != count as c_long {
++                    return Err(Error::new(
++                        ErrorKind::Other,
++                        format!("failed while trying to write to a file"),
++                    ));
++                }
++            }
++
++            Ok(())
++        }
++
++        fn syncronize(&self) -> Result<()> {
++            self.emit(EV_SYN, SYN_REPORT, 0)
++        }
++
++        pub fn set_key(&mut self, code: c_int, down: bool) -> Result<()> {
++            if code < 0 || code as usize >= self.pressed.len() {
++                return Ok(());
++            }
++
++            let index = code as usize;
++            let was_down = self.pressed[index];
++            self.emit(EV_KEY, code, if down { 1 } else { 0 })?;
++            self.syncronize()?;
++            self.pressed[index] = down;
++
++            if down && !was_down {
++                match code {
++                    KEY_CAPSLOCK => self.caps_lock = !self.caps_lock,
++                    KEY_NUMLOCK => self.num_lock = !self.num_lock,
++                    _ => {}
++                }
++            }
++
++            Ok(())
++        }
++
++        pub fn is_key_pressed(&self, code: c_int) -> bool {
++            if code < 0 || code as usize >= self.pressed.len() {
++                return false;
++            }
++            self.pressed[code as usize]
++        }
++
++        pub fn caps_lock_state(&self) -> bool {
++            self.caps_lock
++        }
++
++        pub fn num_lock_state(&self) -> bool {
++            self.num_lock
++        }
++    }
++
++    impl Drop for UInputKeyboardManager {
++        fn drop(&mut self) {
++            let fd = self.uinput_file.as_raw_fd();
++            unsafe {
++                ioctl(fd, UI_DEV_DESTROY as c_ulong);
++            }
++        }
++    }
++
+     pub struct UInputMouseManager {
+         uinput_file: File,
+         xcb_pointer: Option<XcbPointer>,
+@@ -1249,7 +1497,7 @@ mod mouce {
+         }
+ 
+         fn setup_device(&self, fd: c_int, rng_x: (i32, i32), rng_y: (i32, i32)) -> Result<()> {
+-            let name = device_name();
++            let name = mouse_device_name();
+             let id = InputId {
+                 bustype: BUS_USB,
+                 // Random vendor and product

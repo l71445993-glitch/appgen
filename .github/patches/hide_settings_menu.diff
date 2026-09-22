@@ -1,0 +1,11 @@
+diff --git a/flutter/lib/desktop/pages/desktop_home_page.dart b/flutter/lib/desktop/pages/desktop_home_page.dart
+--- a/flutter/lib/desktop/pages/desktop_home_page.dart
++++ b/flutter/lib/desktop/pages/desktop_home_page.dart
+@@ -222,6 +222,6 @@
+                                   ?.withOpacity(0.5)),
+                         ).marginOnly(top: 5),
+-                        buildPopupMenu(context)
++                        const SizedBox(width: 30, height: 30)
+                       ],
+                     ),
+                   ),

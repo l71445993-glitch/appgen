@@ -1,0 +1,111 @@
+{% extends "base_account.html" %}
+
+{% block title %}{{ page_title }} | RustDesk 生成器{% endblock %}
+
+{% block extra_head %}
+<style>
+    .policy-panel { margin-top: 24px; padding: 24px 0 0; border-top: 1px solid var(--line); }
+    .policy-panel h2 { margin: 0 0 5px; color: var(--ink); font-size: 16px; }
+    .policy-panel__intro { margin: 0 0 20px; color: var(--muted); font-size: 12px; }
+    .policy-grid { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(0, 1.2fr); gap: 18px 22px; align-items: start; }
+    .policy-field { display: grid; gap: 7px; }
+    .policy-field label { color: var(--ink-soft); font-size: 12px; font-weight: 800; }
+    .policy-field select, .policy-field input { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--ink); }
+    .policy-field select:focus, .policy-field input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 4px rgba(50,119,246,.13); }
+    .policy-field--full { grid-column: 1 / -1; }
+    .policy-field[hidden] { display: none; }
+    .policy-help { color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .policy-summary { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 9px 11px; border: 1px solid #c9d9f6; border-radius: 7px; background: #f3f7ff; color: #425b85; font-size: 12px; }
+    .policy-summary i { color: var(--accent); }
+    @media (max-width: 640px) {
+        .policy-panel { padding: 20px 18px; }
+        .policy-grid { grid-template-columns: 1fr; gap: 15px; }
+        .policy-field--full { grid-column: auto; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-heading">
+    <div class="page-heading__copy">
+        <span class="eyebrow">ACCESS CONTROL</span>
+        <h1>{{ page_title }}</h1>
+        <p class="page-heading__subtitle">配置账号基本资料与进入工作区的权限。</p>
+    </div>
+</div>
+<section class="panel form-panel">
+    <form method="post">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        {% for field in form %}
+            {% if field.name != 'expiration_mode' and field.name != 'expires_at' and field.name != 'generation_limit' %}
+            <div class="field{% if field.field.widget.input_type == 'checkbox' %} field--check{% endif %}">
+                {% if field.field.widget.input_type == 'checkbox' %}
+                    {{ field }}{{ field.label_tag }}
+                {% else %}
+                    {{ field.label_tag }}{{ field }}
+                {% endif %}
+                {{ field.errors }}
+                {% if field.help_text %}<span class="helptext">{{ field.help_text|safe }}</span>{% endif %}
+            </div>
+            {% endif %}
+        {% endfor %}
+        <section class="policy-panel" aria-labelledby="policy-title">
+    <h2 id="policy-title"><i class="fa-solid fa-hourglass-half" aria-hidden="true"></i> 生成额度与有效期</h2>
+    <p class="policy-panel__intro">控制这个账号还能提交多少次构建。账号到期或额度用尽后不能创建新构建，历史任务和已有下载链接不受影响。</p>
+    <div class="policy-grid">
+        <div class="policy-field">
+            <label for="{{ form.expiration_mode.id_for_label }}">过期方式</label>
+            {{ form.expiration_mode }}
+            {{ form.expiration_mode.errors }}
+            {% if form.expiration_mode.help_text %}<span class="policy-help">{{ form.expiration_mode.help_text|safe }}</span>{% endif %}
+        </div>
+        <div id="timePolicyField" class="policy-field">
+            <label for="{{ form.expires_at.id_for_label }}">过期时间（北京时间）</label>
+            {{ form.expires_at }}
+            {{ form.expires_at.errors }}
+            <span class="policy-help">留空表示永久有效。</span>
+        </div>
+        <div id="countPolicyField" class="policy-field" hidden>
+            <label for="{{ form.generation_limit.id_for_label }}">可生成次数</label>
+            {{ form.generation_limit }}
+            {{ form.generation_limit.errors }}
+            <span class="policy-help">仅在安装包成功上传后扣减次数，构建失败不会消耗额度。</span>
+        </div>
+        <div class="policy-field policy-field--full">
+            <div class="policy-summary"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span id="policySummary">按时间限制：留空为永久有效。</span></div>
+        </div>
+    </div>
+        </section>
+        <div class="form-actions">
+            <button class="button" type="submit"><i class="fa-solid fa-check" aria-hidden="true"></i> {{ submit_label }}</button>
+            <a class="button button--secondary" href="{% url 'users:list' %}"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> 取消</a>
+        </div>
+    </form>
+</section>
+<script>
+    (() => {
+        const mode = document.getElementById('{{ form.expiration_mode.id_for_label }}');
+        const timeField = document.getElementById('timePolicyField');
+        const countField = document.getElementById('countPolicyField');
+        const expires = document.getElementById('{{ form.expires_at.id_for_label }}');
+        const limit = document.getElementById('{{ form.generation_limit.id_for_label }}');
+        const summary = document.getElementById('policySummary');
+        if (!mode || !timeField || !countField) return;
+        const sync = () => {
+            const countMode = mode.value === 'count';
+            timeField.hidden = countMode;
+            countField.hidden = !countMode;
+            if (expires) expires.disabled = countMode;
+            if (limit) limit.disabled = !countMode;
+            if (summary) summary.textContent = countMode
+                ? `按生成次数限制：${limit?.value || '尚未设置'} 次成功出包。`
+                : (expires?.value ? `按时间限制：将在 ${expires.value.replace('T', ' ')} 到期。` : '按时间限制：留空为永久有效。');
+        };
+        mode.addEventListener('change', sync);
+        expires?.addEventListener('input', sync);
+        limit?.addEventListener('input', sync);
+        sync();
+    })();
+</script>
+{% endblock %}

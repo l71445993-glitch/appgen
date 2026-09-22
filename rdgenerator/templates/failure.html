@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="pageTitle">客户端生成失败</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet">
+    {% include "includes/local_icons.html" %}
+    <style>
+        :root {
+            --surface: #ffffff;
+            --line: #d8e7fb;
+            --text: #10223d;
+            --muted: #5e7190;
+            --blue: #1769e0;
+            --blue-strong: #0b4fb8;
+            --danger: #c0392b;
+            --warning-bg: #fff7e6;
+            --warning-line: #ffe1a6;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            height: auto;
+            padding: 40px 16px;
+            margin: 0;
+            text-align: center;
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(245, 249, 255, 0.96)),
+                linear-gradient(90deg, rgba(23, 105, 224, 0.08) 1px, transparent 1px),
+                linear-gradient(0deg, rgba(23, 105, 224, 0.08) 1px, transparent 1px);
+            background-size: auto, 42px 42px, 42px 42px;
+            color: var(--text);
+        }
+        .platform-logo {
+            width: 150px;
+            height: 150px;
+            margin-bottom: 30px;
+            display: none;
+            filter: drop-shadow(0 10px 15px rgba(0,0,0,0.2));
+            transition: transform 0.3s ease;
+        }
+        .error-container {
+            background: var(--surface);
+            border-radius: 8px;
+            padding: 30px;
+            border: 1px solid var(--line);
+            box-shadow: 0 18px 45px rgba(22, 81, 152, 0.10);
+            max-width: 500px;
+            width: 90%;
+        }
+        .error-header {
+            color: var(--danger);
+            font-weight: 700;
+            margin-bottom: 10px;
+            font-size: 1.5em;
+        }
+        .warning-box {
+            background-color: var(--warning-bg);
+            border: 1px solid var(--warning-line);
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+            text-align: left;
+        }
+        .download-section {
+            background: #f8fbff;
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px dashed #ccc;
+            text-align: left;
+        }
+        .download-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--text); font-size: 13px; font-weight: 700; }
+        .download-heading span { color: var(--muted); font-size: 10px; font-weight: 500; }
+        .download-item { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid #e7eef8; }
+        .download-item:first-of-type { border-top: 0; }
+        .download-name { min-width: 0; color: var(--text); font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+        .download-meta { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: 500; }
+        .download-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin: 0;
+            padding: 12px;
+            background: linear-gradient(180deg, var(--blue), var(--blue-strong));
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: opacity 0.3s ease;
+        }
+        .download-link:hover {
+            opacity: 0.8;
+        }
+        .copy-link { display: inline-grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--blue-strong); cursor: pointer; }
+        .copy-link:hover { border-color: var(--blue); background: #f3f7ff; }
+        .download-actions { display: flex; align-items: center; gap: 6px; }
+        .log-link {
+            display: inline-block;
+            margin-top: 15px;
+            color: var(--blue-strong);
+            text-decoration: none;
+            font-size: 0.85em;
+        }
+        .platform-note {
+            color: var(--muted);
+            font-size: 0.85em;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <svg id="windowsLogo" class="platform-logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+        <rect width="256" height="256" rx="50" ry="50" fill="#0078D7"/>
+        <text x="128" y="160" font-family="Arial" font-size="50" font-weight="bold" text-anchor="middle" fill="white">Win</text>
+    </svg>
+    <div class="error-container">
+        <h2 class="error-header">构建未完成</h2>
+        
+        <div class="warning-box">
+            <strong>提示：</strong>构建流程没有成功完成，部分文件可能缺失。下方会显示当前已经可用的文件。
+        </div>
+
+        <div class="download-section">
+            <div class="download-heading"><strong>已生成文件</strong>{% if download_expires_at %}<span>链接有效至 {{ download_expires_at|date:"Y-m-d H:i" }}</span>{% endif %}</div>
+            {% if download_links %}
+                {% for link in download_links %}
+                    <div class="download-item"><div class="download-name">{{ link.filename }}<span class="download-meta">{% if link.requires_login %}<i class="fa-solid fa-lock" aria-hidden="true"></i> 登录后下载{% else %}<i class="fa-solid fa-link" aria-hidden="true"></i> 无需登录{% endif %}{% if link.expires_at %} · {{ link.expires_at|date:"Y-m-d H:i" }} 失效{% endif %}</span></div><div class="download-actions"><button type="button" class="copy-link" data-copy-url="{{ link.url }}" title="复制下载链接" aria-label="复制 {{ link.filename }} 下载链接"><i class="fa-solid fa-copy" aria-hidden="true"></i></button><a href="{{ link.url }}" class="download-link" rel="noreferrer"><i class="fa-solid fa-download" aria-hidden="true"></i> 下载</a></div></div>
+                {% endfor %}
+            {% elif files %}
+                {% for file in files %}
+                    <div class="download-item"><div class="download-name">{{ file }}</div><a href="/download?filename={{ file|urlencode }}&amp;uuid={{ uuid|urlencode }}" class="download-link"><i class="fa-solid fa-download" aria-hidden="true"></i> 下载</a></div>
+                {% endfor %}
+            {% else %}
+                <p>暂无可下载的生成文件。</p>
+            {% endif %}
+        </div>
+
+        <a href="{{ log_url }}" target="_blank" class="log-link">查看 GitHub 日志获取错误详情 ↗</a>
+        
+        <div id="platformNote" class="platform-note"></div>
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+        <a href="/" style="font-size: 0.9em; color: #5e7190; text-decoration: none;">← 返回生成器</a>
+    </div>
+
+    <script>
+        function updatePlatformUI() {
+            const platform = '{{platform}}'.toLowerCase();
+            const platformLogos = {
+                'windows': document.getElementById('windowsLogo'),
+                'macos': document.getElementById('macosLogo'),
+                'linux': document.getElementById('linuxLogo'),
+                'android': document.getElementById('androidLogo')
+            };
+            
+            Object.values(platformLogos).forEach(logo => { if(logo) logo.style.display = 'none'; });
+
+            if (platform.includes('windows')) {
+                document.getElementById('pageTitle').textContent = 'Windows 客户端生成失败';
+                if(platformLogos.windows) platformLogos.windows.style.display = 'block';
+            } else if (platform === 'macos') {
+                if(platformLogos.macos) platformLogos.macos.style.display = 'block';
+            } else if (platform === 'linux') {
+                if(platformLogos.linux) platformLogos.linux.style.display = 'block';
+            }
+        }
+        updatePlatformUI();
+        document.querySelectorAll('[data-copy-url]').forEach(button => {
+            button.addEventListener('click', async () => {
+                const url = new URL(button.dataset.copyUrl, window.location.href).href;
+                try {
+                    await navigator.clipboard.writeText(url);
+                    button.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i>';
+                    button.title = '已复制';
+                    setTimeout(() => { button.innerHTML = '<i class="fa-solid fa-copy" aria-hidden="true"></i>'; button.title = '复制下载链接'; }, 1400);
+                } catch (error) {
+                    window.prompt('复制下载链接', url);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

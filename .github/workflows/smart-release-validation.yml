@@ -1,0 +1,226 @@
+name: Smart multi-relay release validation
+run-name: Smart multi-relay release validation ${{ inputs.filename }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      server:
+        description: Domain-based hbbs endpoint, including rendezvous port
+        required: true
+        type: string
+      key:
+        description: Public hbbs identity key
+        required: true
+        type: string
+      api_server:
+        description: HTTPS API origin used to require strict WSS
+        required: true
+        type: string
+      filename:
+        description: Artifact filename stem
+        required: true
+        default: RDSmart149
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: smart-multi-relay-release-validation
+  cancel-in-progress: false
+
+jobs:
+  prepare-and-dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build encrypted validation inputs
+        id: inputs
+        shell: bash
+        env:
+          API_SERVER: ${{ inputs.api_server }}
+          FILENAME: ${{ inputs.filename }}
+          SERVER: ${{ inputs.server }}
+          SERVER_KEY: ${{ inputs.key }}
+          ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --quiet pyzipper
+          python <<'PY'
+          import base64
+          import json
+          import os
+          import secrets
+          import uuid
+
+          import pyzipper
+
+          required = ("API_SERVER", "FILENAME", "SERVER", "SERVER_KEY", "ZIP_PASSWORD")
+          missing = [name for name in required if not os.environ.get(name)]
+          if missing:
+              raise SystemExit(f"Missing required release inputs: {', '.join(missing)}")
+
+          server = os.environ["SERVER"].strip()
+          api_server = os.environ["API_SERVER"].strip()
+          server_key = os.environ["SERVER_KEY"].strip()
+          filename = os.environ["FILENAME"].strip()
+          if ":" not in server or server.rsplit(":", 1)[0].replace(".", "").isdigit():
+              raise SystemExit("Smart release validation requires a domain and rendezvous port")
+          if not api_server.startswith("https://"):
+              raise SystemExit("Smart release validation requires an HTTPS API origin")
+          if not filename or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for character in filename):
+              raise SystemExit("Artifact filename must be ASCII letters, digits, underscore, or hyphen")
+
+          custom = {
+              "custom-rendezvous-server": server,
+              "api-server": api_server,
+              "key": server_key,
+              "override-settings": {
+                  "api-server": api_server,
+                  "relay-server": "",
+                  "allow-websocket": "Y",
+                  "allow-insecure-tls-fallback": "N",
+              },
+              "default-settings": {"view-style": "adaptive"},
+              "enable-lan-discovery": "Y",
+              "allow-auto-disconnect": "N",
+          }
+          encoded_custom = base64.b64encode(
+              json.dumps(custom, separators=(",", ":")).encode("ascii")
+          ).decode("ascii")
+          validation_uuid = str(uuid.uuid4())
+          false = "false"
+          payload = {
+              "server": server,
+              "key": server_key,
+              "apiServer": api_server,
+              "custom": encoded_custom,
+              "uuid": validation_uuid,
+              "iconlink_url": false,
+              "iconlink_uuid": false,
+              "iconlink_file": false,
+              "logolink_url": false,
+              "logolink_uuid": false,
+              "logolink_file": false,
+              "privacylink_url": false,
+              "privacylink_uuid": false,
+              "privacylink_file": false,
+              "appname": "RDSmart",
+              "genurl": api_server,
+              "urlLink": api_server,
+              "downloadLink": api_server,
+              "delayFix": false,
+              "smartMultiRelay": "true",
+              "beijingCustom": false,
+              "rdgen": "validation",
+              "direction": "both",
+              "hideNetworkSetting": false,
+              "defaultViewStyle": "adaptive",
+              "removeSetupServerTip": false,
+              "silentInstallOnDoubleClick": false,
+              "silentAgentMode": false,
+              "hidecm": false,
+              "hidecmDefaultEnabled": false,
+              "copyIdPasswordButton": false,
+              "manualTemporaryPassword": false,
+              "showStartOnBootCheckbox": false,
+              "incomingCompactMode": false,
+              "incomingContentWidth": "220",
+              "incomingContentHeight": "300",
+              "forceDisableFileTransfer": false,
+              "cycleMonitor": false,
+              "xOffline": false,
+              "removeNewVersionNotif": false,
+              "hideSettingsMenu": false,
+              "removeRecentSessions": false,
+              "compname": "RDSmart",
+              "androidappid": "com.rdsmart.client",
+              "filename": filename,
+              "token": secrets.token_urlsafe(32),
+              "status_signature": "validation",
+          }
+
+          with pyzipper.AESZipFile(
+              "secrets.zip",
+              "w",
+              compression=pyzipper.ZIP_LZMA,
+              encryption=pyzipper.WZ_AES,
+          ) as archive:
+              archive.setpassword(os.environ["ZIP_PASSWORD"].encode())
+              archive.writestr(
+                  "secrets.json",
+                  json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+              )
+
+          artifact_name = f"smart-release-inputs-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"artifact_name={artifact_name}\n")
+              output.write(f"validation_uuid={validation_uuid}\n")
+          PY
+
+      - name: Upload encrypted validation inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.inputs.outputs.artifact_name }}
+          path: secrets.zip
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Dispatch four supported platform builds
+        shell: python
+        env:
+          ARTIFACT_NAME: ${{ steps.inputs.outputs.artifact_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          VALIDATION_UUID: ${{ steps.inputs.outputs.validation_uuid }}
+        run: |
+          import json
+          import os
+          import urllib.request
+
+          metadata = json.dumps(
+              {
+                  "source": "actions-artifact",
+                  "run_id": int(os.environ["SOURCE_RUN_ID"]),
+                  "artifact": os.environ["ARTIFACT_NAME"],
+                  "uuid": os.environ["VALIDATION_UUID"],
+                  "url": f"https://github.com/{os.environ['REPOSITORY']}",
+                  "file": "secrets.zip",
+                  "status_signature": "validation",
+              },
+              separators=(",", ":"),
+          )
+          workflows = (
+              "generator-windows.yml",
+              "generator-windows-x86.yml",
+              "generator-linux.yml",
+              "generator-android.yml",
+          )
+          for workflow in workflows:
+              url = (
+                  f"https://api.github.com/repos/{os.environ['REPOSITORY']}"
+                  f"/actions/workflows/{workflow}/dispatches"
+              )
+              body = json.dumps(
+                  {
+                      "ref": "master",
+                      "inputs": {"version": "1.4.9", "zip_url": metadata},
+                  }
+              ).encode("utf-8")
+              request = urllib.request.Request(
+                  url,
+                  data=body,
+                  method="POST",
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                      "Content-Type": "application/json",
+                      "User-Agent": "rdgen-smart-release-validation",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  if response.status != 204:
+                      raise SystemExit(f"Dispatch {workflow} returned {response.status}")
+              print(f"dispatched={workflow}")

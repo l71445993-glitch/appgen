@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="pageTitle">客户端生成成功</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet">
+    {% include "includes/local_icons.html" %}
+    <style>
+        :root {
+            --surface: #ffffff;
+            --line: #d8e7fb;
+            --text: #10223d;
+            --muted: #5e7190;
+            --blue: #1769e0;
+            --blue-strong: #0b4fb8;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            height: auto;
+            padding: 40px 16px;
+            margin: 0;
+            text-align: center;
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(245, 249, 255, 0.96)),
+                linear-gradient(90deg, rgba(23, 105, 224, 0.08) 1px, transparent 1px),
+                linear-gradient(0deg, rgba(23, 105, 224, 0.08) 1px, transparent 1px);
+            background-size: auto, 42px 42px, 42px 42px;
+            color: var(--text);
+        }
+        .platform-logo {
+            width: 150px;
+            height: 150px;
+            margin-bottom: 30px;
+            display: none;
+            filter: drop-shadow(0 10px 15px rgba(0,0,0,0.2));
+            transition: transform 0.3s ease;
+        }
+        .platform-logo:hover {
+            transform: scale(1.1);
+        }
+        .success-text {
+            color: var(--text);
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+        .download-section {
+            background: rgba(255,255,255,0.9);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--line);
+            box-shadow: 0 18px 45px rgba(22, 81, 152, 0.10);
+            margin-top: 20px;
+            width: min(560px, 92vw);
+            min-width: 0;
+            text-align: left;
+        }
+        .download-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 12px; }
+        .download-heading strong { color: var(--text); font-size: 14px; }
+        .download-heading span { color: var(--muted); font-size: 11px; }
+        .download-item { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid #edf2f8; }
+        .download-item:first-of-type { border-top: 0; }
+        .download-name { min-width: 0; color: var(--text); font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+        .download-meta { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: 500; }
+        .download-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 10px;
+            background: linear-gradient(180deg, var(--blue), var(--blue-strong));
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+            white-space: nowrap;
+        }
+        .download-link:hover {
+            background-color: var(--blue-strong);
+        }
+        .copy-link { display: inline-grid; width: 36px; height: 36px; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--blue-strong); cursor: pointer; }
+        .copy-link:hover { border-color: var(--blue); background: #f3f7ff; }
+        .download-actions { display: flex; align-items: center; gap: 7px; }
+        .platform-note {
+            color: var(--muted);
+            font-size: 0.9em;
+            margin-top: 15px;
+            background: rgba(255,255,255,0.85);
+            border: 1px solid var(--line);
+            padding: 10px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <svg id="windowsLogo" class="platform-logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <linearGradient id="windowsGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#00A4EF;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#0078D7;stop-opacity:1" />
+            </linearGradient>
+        </defs>
+        <rect width="256" height="256" rx="50" ry="50" fill="url(#windowsGradient)"/>
+        <path d="M60 60 L196 60 L196 196 L60 196 Z" fill="white" opacity="0.2"/>
+        <path d="M128 60 L196 60 L196 128 Z" fill="white" opacity="0.1"/>
+        <text x="128" y="200" font-family="Arial" font-size="50" font-weight="bold" text-anchor="middle" fill="white">Win</text>
+    </svg>
+
+    <svg id="macosLogo" class="platform-logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <linearGradient id="macosGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#A2AAAD;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#4A4A4A;stop-opacity:1" />
+            </linearGradient>
+            <filter id="macosGlow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur class="blur" result="coloredBlur" stdDeviation="4"></feGaussianBlur>
+                <feMerge>
+                    <feMergeNode in="coloredBlur"></feMergeNode>
+                    <feMergeNode in="SourceGraphic"></feMergeNode>
+                </feMerge>
+            </filter>
+        </defs>
+        <rect width="256" height="256" rx="50" ry="50" fill="url(#macosGradient)" filter="url(#macosGlow)"/>
+        <path d="M128 80 C100 120, 156 140, 128 200" fill="none" stroke="white" stroke-width="10" opacity="0.3"/>
+        <text x="128" y="200" font-family="Arial" font-size="50" font-weight="bold" text-anchor="middle" fill="white">Mac</text>
+    </svg>
+
+    <svg id="linuxLogo" class="platform-logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <linearGradient id="linuxGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#FFA500;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#FF4500;stop-opacity:1" />
+            </linearGradient>
+        </defs>
+        <rect width="256" height="256" rx="50" ry="50" fill="url(#linuxGradient)"/>
+        <path d="M128 80 C100 120, 156 140, 128 200" fill="none" stroke="white" stroke-width="10" opacity="0.3"/>
+        <text x="128" y="200" font-family="Arial" font-size="50" font-weight="bold" text-anchor="middle" fill="white">Linux</text>
+    </svg>
+
+    <svg id="androidLogo" class="platform-logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <linearGradient id="androidGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#A4C639;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#78C257;stop-opacity:1" />
+            </linearGradient>
+        </defs>
+        <rect width="256" height="256" rx="50" ry="50" fill="url(#androidGradient)"/>
+        <path d="M128 80 
+                 C100 100, 156 100, 128 130 
+                 Q110 160, 128 190 
+                 Q146 160, 128 130 Z" 
+              fill="white" opacity="0.3"/>
+        <path d="M90 100 L70 140" stroke="white" stroke-width="10" stroke-linecap="round"/>
+        <path d="M166 100 L186 140" stroke="white" stroke-width="10" stroke-linecap="round"/>
+        <text x="128" y="200" font-family="Arial" font-size="50" font-weight="bold" text-anchor="middle" fill="white">Android</text>
+    </svg>
+
+    <div>
+        <h2 class="success-text">客户端生成成功</h2>
+        <div class="download-section">
+            <div class="download-heading">
+                <strong>可下载文件</strong>
+                {% if download_expires_at %}<span>链接有效至 {{ download_expires_at|date:"Y-m-d H:i" }}</span>{% endif %}
+            </div>
+            {% if download_links %}
+                {% for link in download_links %}
+                    <div class="download-item">
+                        <div class="download-name">{{ link.filename }}<span class="download-meta">{% if link.requires_login %}<i class="fa-solid fa-lock" aria-hidden="true"></i> 登录后下载{% else %}<i class="fa-solid fa-link" aria-hidden="true"></i> 无需登录{% endif %}{% if link.expires_at %} · {{ link.expires_at|date:"Y-m-d H:i" }} 失效{% endif %}</span></div>
+                        <div class="download-actions"><button type="button" class="copy-link" data-copy-url="{{ link.url }}" title="复制下载链接" aria-label="复制 {{ link.filename }} 下载链接"><i class="fa-solid fa-copy" aria-hidden="true"></i></button><a href="{{ link.url }}" class="download-link" rel="noreferrer"><i class="fa-solid fa-download" aria-hidden="true"></i> 下载</a></div>
+                    </div>
+                {% endfor %}
+            {% elif files %}
+                {% for file in files %}
+                    <div class="download-item"><div class="download-name">{{ file }}</div><a href="/download?filename={{ file|urlencode }}&amp;uuid={{ uuid|urlencode }}" class="download-link"><i class="fa-solid fa-download" aria-hidden="true"></i> 下载</a></div>
+                {% endfor %}
+            {% else %}
+                <p>没有生成可下载文件。</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div id="platformNote" class="platform-note"></div>
+
+    <script>
+        function updatePlatformUI() {
+            const platform = '{{platform}}'.toLowerCase();
+            const platformLogos = {
+                'windows': document.getElementById('windowsLogo'),
+                'macos': document.getElementById('macosLogo'),
+                'linux': document.getElementById('linuxLogo'),
+                'android': document.getElementById('androidLogo')
+            };
+            const platformNote = document.getElementById('platformNote');
+
+            // Reset all logos
+            Object.values(platformLogos).forEach(logo => logo.style.display = 'none');
+
+            // Set appropriate logo and title
+            if (platform === 'macos') {
+                document.getElementById('pageTitle').textContent = 'macOS 客户端已生成';
+                platformLogos.macos.style.display = 'block';
+                platformNote.textContent = 'macOS 提示：运行应用时可能需要调整系统安全设置。';
+                platformNote.style.display = 'block';
+            } else if (platform === 'windows' || platform === 'windows-x86') {
+                document.getElementById('pageTitle').textContent = 'Windows 客户端已生成';
+                platformLogos.windows.style.display = 'block';
+                platformNote.textContent = 'Windows 提示：运行时可能需要允许 SmartScreen 或调整安全设置。';
+                platformNote.style.display = 'block';
+            } else if (platform === 'linux') {
+                document.getElementById('pageTitle').textContent = 'Linux 客户端已生成';
+                platformLogos.linux.style.display = 'block';
+                platformNote.textContent = 'Linux 提示：请确认系统已安装所需依赖。';
+                platformNote.style.display = 'block';
+            } else if (platform === 'android') {
+                document.getElementById('pageTitle').textContent = 'Android 客户端已生成';
+                platformLogos.android.style.display = 'block';
+                platformNote.textContent = 'Android 提示：可能需要在设备设置中允许安装未知来源应用。';
+                platformNote.style.display = 'block';
+            }
+        }
+
+        // Call on page load
+        updatePlatformUI();
+        document.querySelectorAll('[data-copy-url]').forEach(button => {
+            button.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(new URL(button.dataset.copyUrl, window.location.href).href);
+                    button.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i>';
+                    button.title = '已复制';
+                    setTimeout(() => { button.innerHTML = '<i class="fa-solid fa-copy" aria-hidden="true"></i>'; button.title = '复制下载链接'; }, 1400);
+                } catch (error) {
+                    window.prompt('复制下载链接', new URL(button.dataset.copyUrl, window.location.href).href);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

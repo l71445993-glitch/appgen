@@ -1,0 +1,70 @@
+{% extends "base_account.html" %}
+{% load static %}
+
+{% block title %}登录 | 客户端生成器{% endblock %}
+{% block body_class %}auth-page auth-page--login{% endblock %}
+{% block header %}{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'rdgenerator/login-modern.css' %}?v=2">
+{% endblock %}
+
+{% block content %}
+<div class="login-shell">
+    <section class="login-panel" aria-labelledby="login-title">
+        <div class="login-panel__inner">
+            <a class="login-brand" href="/" aria-label="客户端生成器首页">
+                <span class="login-brand__mark" aria-hidden="true">RD</span>
+                <span class="login-brand__copy">
+                    <strong>客户端生成器</strong>
+                    <small>RustDesk Builder</small>
+                </span>
+            </a>
+
+            <div class="login-form">
+                <span class="login-form__eyebrow">CLIENT BUILDER</span>
+                <h1 id="login-title">欢迎回来</h1>
+                <p class="login-form__sub">登录后继续配置与构建客户端。</p>
+
+                <form class="login-form__fields" method="post" action="{% url 'users:login' %}">
+                    {% csrf_token %}
+                    {% if form.non_field_errors %}
+                        <div class="login-form__error" role="alert">用户名或密码不正确。</div>
+                    {% endif %}
+                    <div class="field">
+                        {{ form.username.label_tag }}
+                        {{ form.username }}
+                        {{ form.username.errors }}
+                    </div>
+                    <div class="field">
+                        {{ form.password.label_tag }}
+                        {{ form.password }}
+                        {{ form.password.errors }}
+                    </div>
+                    <input type="hidden" name="next" value="{{ next }}">
+                    <button class="login-submit" type="submit">
+                        <svg viewBox="0 0 20 20" aria-hidden="true">
+                            <path d="M4 10h11m-4-4 4 4-4 4"></path>
+                        </svg>
+                        登录
+                    </button>
+                </form>
+            </div>
+
+            <p class="login-switch">还没有账号？<a href="{% url 'users:register' %}">创建账号</a></p>
+        </div>
+    </section>
+
+    <aside class="login-visual" aria-label="从配置到云端构建和多端交付">
+        <img
+            class="login-visual__image"
+            src="{% static 'rdgenerator/auth-build-flow.png' %}"
+            alt=""
+            width="1254"
+            height="1254"
+            decoding="async"
+            fetchpriority="high"
+        >
+    </aside>
+</div>
+{% endblock %}

@@ -1,0 +1,85 @@
+{% extends "base_account.html" %}
+
+{% block title %}用户管理 | RustDesk 生成器{% endblock %}
+
+{% block content %}
+<div class="page-heading">
+    <div class="page-heading__copy">
+        <span class="eyebrow">ACCESS CONTROL</span>
+        <h1>用户管理</h1>
+        <p class="page-heading__subtitle">管理谁可以进入生成器，以及每个账号的权限状态。</p>
+    </div>
+    <a class="button page-heading__action" href="{% url 'users:create' %}"><i class="fa-solid fa-user-plus" aria-hidden="true"></i> 创建账号</a>
+</div>
+
+<div class="table-wrap">
+    <table>
+        <caption>工作区账号</caption>
+        <thead>
+            <tr>
+                <th scope="col">账号</th>
+                <th scope="col">联系信息</th>
+                <th scope="col">角色</th>
+                <th scope="col">状态</th>
+                <th scope="col">生成额度</th>
+                <th scope="col">最近登录</th>
+                <th scope="col">创建时间</th>
+                <th scope="col">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for managed_user in users %}
+                <tr>
+                    <td data-label="账号">
+                        <div class="user-cell">
+                            <span class="user-cell__avatar" aria-hidden="true">{{ managed_user.username|first|upper }}</span>
+                            <span><span class="user-cell__name">{{ managed_user.username }}</span>{% if managed_user.get_full_name %}<span class="user-cell__meta">{{ managed_user.get_full_name }}</span>{% endif %}</span>
+                        </div>
+                    </td>
+                    <td data-label="联系信息">{% if managed_user.email %}{{ managed_user.email }}{% else %}<span class="user-cell__meta">未填写</span>{% endif %}</td>
+                    <td data-label="角色"><span class="role-badge">{% if managed_user.is_superuser %}超级管理员{% elif managed_user.is_staff %}管理员{% else %}普通用户{% endif %}</span></td>
+                    <td data-label="状态"><span class="status{% if not managed_user.is_active %} status--off{% endif %}">{% if managed_user.is_active %}正常{% else %}已停用{% endif %}</span></td>
+                    <td data-label="生成额度">
+                        {% with entitlement=managed_user.entitlement %}
+                            {% if entitlement.expiration_mode == 'count' %}
+                                {% if entitlement.generation_limit == None %}
+                                    <span class="status status--off">未开通会员</span>
+                                {% else %}
+                                    <span class="role-badge"><i class="fa-solid fa-box" aria-hidden="true"></i> {{ entitlement.generations_used }}/{{ entitlement.generation_limit }}</span>
+                                    {% if entitlement.reserved_generations %}<span class="user-cell__meta">已预留 {{ entitlement.reserved_generations }}</span>{% endif %}
+                                {% endif %}
+                            {% elif entitlement.expires_at %}
+                                <span class="user-cell__meta">有效至 {{ entitlement.expires_at|date:"Y-m-d H:i" }}</span>
+                            {% else %}
+                                <span class="role-badge"><i class="fa-solid fa-infinity" aria-hidden="true"></i> 永久</span>
+                            {% endif %}
+                            {% if entitlement.is_expired %}<span class="status status--off">已到期</span>{% endif %}
+                        {% endwith %}
+                    </td>
+                    <td data-label="最近登录">{{ managed_user.last_login|date:"Y-m-d H:i"|default:"-" }}</td>
+                    <td data-label="创建时间">{{ managed_user.date_joined|date:"Y-m-d H:i" }}</td>
+                    <td data-label="操作">
+                        <div class="row-actions">
+                            <a class="button button--secondary button--small" href="{% url 'users:edit' managed_user.pk %}" title="编辑账号"><i class="fa-solid fa-pen" aria-hidden="true"></i> 编辑</a>
+                            <a class="button button--secondary button--small" href="{% url 'users:password' managed_user.pk %}" title="重置密码"><i class="fa-solid fa-key" aria-hidden="true"></i> 密码</a>
+                            <form class="inline-form" method="post" action="{% url 'users:toggle' managed_user.pk %}">
+                                {% csrf_token %}
+                                <button class="button {% if managed_user.is_active %}button--danger{% else %}button--secondary{% endif %} button--small" type="submit"{% if managed_user.pk == request.user.pk %} disabled title="不能停用当前账号"{% else %} title="切换账号状态"{% endif %}>
+                                    <i class="fa-solid {% if managed_user.is_active %}fa-user-slash{% else %}fa-user-check{% endif %}" aria-hidden="true"></i>{% if managed_user.is_active %}停用{% else %}启用{% endif %}
+                                </button>
+                            </form>
+                            {% if managed_user.pk == request.user.pk %}
+                                <button class="button button--danger button--small" type="button" disabled title="不能删除当前账号"><i class="fa-solid fa-trash" aria-hidden="true"></i> 删除</button>
+                            {% else %}
+                                <a class="button button--danger button--small" href="{% url 'users:delete' managed_user.pk %}" title="删除账号"><i class="fa-solid fa-trash" aria-hidden="true"></i> 删除</a>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="8"><span class="user-cell__meta">暂无账号。</span></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

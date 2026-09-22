@@ -1,0 +1,2132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RustDesk 自定义客户端生成器</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet">
+    {% include "includes/local_icons.html" %}
+    <style>
+        :root {
+            --page: #f5f9ff;
+            --surface: #ffffff;
+            --surface-strong: #f8fbff;
+            --line: #d8e7fb;
+            --line-strong: #b9d3f4;
+            --text: #10223d;
+            --muted: #5e7190;
+            --blue: #1769e0;
+            --blue-strong: #0b4fb8;
+            --blue-soft: #e7f1ff;
+            --cyan: #13b8d7;
+            --amber: #c47a00;
+            --danger: #d9363e;
+            --shadow: 0 18px 45px rgba(22, 81, 152, 0.10);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        [hidden] {
+            display: none !important;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(245, 249, 255, 0.96)),
+                linear-gradient(90deg, rgba(23, 105, 224, 0.08) 1px, transparent 1px),
+                linear-gradient(0deg, rgba(23, 105, 224, 0.08) 1px, transparent 1px);
+            background-size: auto, 42px 42px, 42px 42px;
+            color: var(--text);
+            margin: 0;
+            padding: 32px 18px 56px;
+        }
+
+        .app-header {
+            margin: -32px -18px 28px;
+            border-bottom: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.95);
+        }
+
+        .app-header__inner {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            width: min(1180px, calc(100% - 32px));
+            min-height: 64px;
+            margin: 0 auto;
+        }
+
+        .app-brand {
+            color: var(--text);
+            font-size: 18px;
+            font-weight: 800;
+        }
+
+        .app-nav, .app-account {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .app-account { margin-left: auto; }
+        .app-username { color: var(--muted); font-size: 14px; font-weight: 700; }
+        .inline-form { display: inline; margin: 0; }
+        .button--secondary.button--small {
+            min-height: 34px;
+            padding: 6px 10px;
+            border: 1px solid var(--line-strong);
+            background: #fff;
+            color: var(--blue-strong);
+            box-shadow: none;
+            font-size: 13px;
+        }
+
+        @media (max-width: 760px) {
+            .app-header__inner {
+                align-items: flex-start;
+                flex-wrap: wrap;
+                gap: 10px 16px;
+                padding: 13px 0;
+            }
+
+            .app-account {
+                width: 100%;
+                margin-left: 0;
+            }
+        }
+
+        .platform {
+            display: grid;
+            grid-template-columns: 1fr;
+            grid-gap: 16px;
+            margin: 0 auto;
+            padding: 0 20px;
+            max-width: 1200px;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-gap: 20px;
+            margin: 0 auto;
+            padding: 10px 20px;
+            max-width: 1200px;
+        }
+
+        .column {
+            flex: 50%;
+        }
+
+        h1 {
+            color: var(--text);
+            text-align: center;
+            grid-column: 1 / -1;
+            margin: 10px auto 28px;
+            max-width: 1200px;
+            font-size: clamp(30px, 4vw, 48px);
+            font-weight: 800;
+            letter-spacing: 0;
+        }
+
+        h1 i {
+            color: var(--blue);
+            margin-right: 10px;
+        }
+
+        h2 {
+            color: var(--text);
+            margin-top: 0;
+            margin-bottom: 16px;
+            font-size: 20px;
+            font-weight: 800;
+        }
+
+        h2 i {
+            color: var(--blue);
+            margin-right: 8px;
+        }
+
+        .section {
+            background: linear-gradient(180deg, var(--surface), var(--surface-strong));
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 22px;
+            box-shadow: var(--shadow);
+            flex: 50%;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--muted);
+            font-weight: 500;
+            line-height: 1.5;
+        }
+
+        input[type="text"], input[type="password"], input[type="number"], select, textarea {
+            width: 100%;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            background-color: #fff;
+            border: 1px solid var(--line-strong);
+            border-radius: 6px;
+            color: var(--text);
+            font: inherit;
+            outline: none;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+        }
+
+        textarea {
+            min-height: 108px;
+            resize: vertical;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus,
+        input[type="number"]:focus,
+        select:focus,
+        textarea:focus {
+            border-color: var(--blue);
+            box-shadow: 0 0 0 4px rgba(23, 105, 224, 0.13);
+        }
+
+        input[type="file"] {
+            width: 100%;
+            color: var(--muted);
+            border: 1px dashed var(--line-strong);
+            background: var(--blue-soft);
+            border-radius: 6px;
+            padding: 10px;
+        }
+
+        input[type="radio"], input[type="checkbox"] {
+            margin-right: 5px;
+            accent-color: var(--blue);
+        }
+
+        ul {
+            padding-left: 20px;
+        }
+
+        button {
+            background: linear-gradient(180deg, var(--blue), var(--blue-strong));
+            color: #fff;
+            border: none;
+            padding: 11px 18px;
+            border-radius: 6px;
+            cursor: pointer;
+            font: inherit;
+            font-weight: 700;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+            box-shadow: 0 10px 24px rgba(23, 105, 224, 0.22);
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 14px 28px rgba(23, 105, 224, 0.28);
+        }
+
+        a {
+            color: var(--blue-strong);
+            font-weight: 700;
+        }
+
+        .platform-icons {
+            display: flex;
+            justify-content: center;
+            gap: 18px;
+            margin-bottom: 18px;
+            flex-wrap: wrap;
+        }
+
+        .fa-stack,
+        .platform-icon {
+            font-size: 32px;
+            color: #7993b6;
+            cursor: pointer;
+            transition: color 0.2s ease, transform 0.2s ease;
+        }
+
+        .platform-icon:hover, .platform-icon.active {
+            color: var(--blue);
+            transform: translateY(-2px);
+        }
+
+        .text-64 {
+            font-size: 0.5em; 
+            font-weight: bold;
+            bottom: -0.2em; 
+            right: -0.2em;
+            position: absolute; 
+            color: var(--blue-strong);
+            transform: translate(-50%, -50%);
+        }
+
+        .text-32 {
+            font-size: 0.5em;
+            font-weight: bold;
+            bottom: -0.2em;
+            right: -0.2em;
+            position: absolute;
+            color: var(--blue-strong);
+            transform: translate(-50%, -50%);
+        }
+
+        .checkbox-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+        }
+
+        .checkbox-group label {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            min-height: 42px;
+            margin: 0;
+            background: rgba(231, 241, 255, 0.7);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 10px 11px;
+        }
+
+        .checkbox-group label input {
+            flex: 0 0 auto;
+            margin: 2px 0 0;
+        }
+
+        .preview-image {
+            max-width: 100%;
+            max-height: 100px;
+            margin-top: 10px;
+        }
+
+        .error {
+            color: var(--danger);
+            font-weight: 700;
+        }
+
+        .errorlist {
+            color: var(--danger);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            list-style: none;
+            padding: 10px 14px;
+            margin: 10px auto;
+            width: fit-content;
+            background: #fff2f0;
+            border: 1px solid #ffccc7;
+            border-radius: 6px;
+        }
+
+        .errorlist li {
+            margin: 5px; /* Add some spacing between list items */
+        }
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .help-text {
+            color: var(--amber);
+            background: #fff7e6;
+            border: 1px solid #ffe1a6;
+            animation: none;
+            padding: 6px 8px;
+            border-radius: 6px;
+            display: inline-block;
+            margin: 0 0 12px;
+            font-size: 13px;
+        }
+
+        .desktop-behavior-section {
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px solid var(--line);
+        }
+
+        .desktop-behavior-section h3 {
+            color: var(--text);
+            margin: 0 0 8px;
+            font-size: 16px;
+            font-weight: 800;
+        }
+
+        .desktop-behavior-section h3 i {
+            color: var(--blue);
+            margin-right: 8px;
+        }
+
+        .desktop-behavior-grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .desktop-behavior-field {
+            min-width: 0;
+        }
+
+        .desktop-behavior-field--primary {
+            display: grid;
+            grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+            align-items: center;
+            gap: 16px;
+        }
+
+        .desktop-behavior-field--primary > label {
+            margin-bottom: 0;
+        }
+
+        .desktop-behavior-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 16px;
+        }
+
+        .desktop-behavior-options > .desktop-behavior-toggle {
+            flex: 1 1 calc(50% - 8px);
+            min-width: min(100%, 280px);
+        }
+
+        .desktop-behavior-field > label {
+            margin-bottom: 6px;
+        }
+
+        .desktop-behavior-field select,
+        .desktop-behavior-field input[type="number"] {
+            margin-bottom: 0;
+        }
+
+        .desktop-behavior-field .help-text {
+            margin: 6px 0 0;
+        }
+
+        .desktop-behavior-toggle {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            min-height: 42px;
+            margin-bottom: 0;
+            padding: 10px 11px;
+            background: rgba(231, 241, 255, 0.66);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            color: var(--text);
+            font-weight: 600;
+            line-height: 1.45;
+        }
+
+        .desktop-behavior-toggle input {
+            margin: 2px 0 0;
+            flex: 0 0 auto;
+        }
+
+        .desktop-behavior-compact-field {
+            grid-column: 1 / -1;
+        }
+
+        .desktop-behavior-size {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px 16px;
+            margin-top: 10px;
+            padding-top: 12px;
+            border-top: 1px dashed var(--line);
+        }
+
+        .desktop-behavior-size[hidden] {
+            display: none !important;
+        }
+
+        .password-requirement {
+            display: none;
+            color: var(--amber);
+            background: #fff7e6;
+            border: 1px solid #ffe1a6;
+            font-size: 0.92em;
+            margin: 5px 0 12px;
+            padding: 8px 10px;
+            border-radius: 6px;
+        }
+
+        .section > br {
+            display: none;
+        }
+
+        .form-actions {
+            text-align: center;
+        }
+
+        .form-actions button {
+            min-width: min(100%, 320px);
+            min-height: 48px;
+            font-size: 17px;
+        }
+
+        @media (max-width: 900px) {
+            .container {
+                grid-template-columns: 1fr;
+                padding: 10px 12px;
+            }
+
+            .platform {
+                padding: 0 12px;
+            }
+
+            .desktop-behavior-field--primary,
+            .desktop-behavior-size {
+                grid-template-columns: 1fr;
+            }
+
+            .desktop-behavior-field--primary {
+                gap: 6px;
+            }
+
+        }
+
+        /* Console system: preserve the form hooks while keeping the builder visually quiet and precise. */
+        .workspace-page {
+            --ui-canvas: #f3f4f6;
+            --ui-surface: #ffffff;
+            --ui-subtle: #f8f9fa;
+            --ui-line: #e1e4e8;
+            --ui-line-strong: #d2d6dc;
+            --ui-ink: #1b1e23;
+            --ui-muted: #69717d;
+            --ui-accent: #2f63cc;
+            --ui-accent-soft: #eef3fc;
+            --ui-danger: #c94958;
+            min-height: 100vh;
+            padding: 0 0 64px;
+            background: var(--ui-canvas);
+            color: var(--ui-ink);
+            font-family: Manrope, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+        }
+        .workspace-page::before {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background: none;
+            content: '';
+            pointer-events: none;
+        }
+        .workspace-page .app-header {
+            position: fixed;
+            inset: 0 auto 0 0;
+            z-index: 20;
+            width: 248px;
+            height: auto;
+            margin: 0;
+            border: 0;
+            overflow-y: auto;
+            border-right: 1px solid #2a2d34;
+            border-radius: 0;
+            background: #15171c;
+            box-shadow: none;
+        }
+        .workspace-page .app-header__inner {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            width: auto;
+            min-height: 100dvh;
+            padding: 28px 18px 20px;
+            gap: 0;
+        }
+        .workspace-page .app-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 2px 10px 30px;
+            color: #fff;
+            font-size: 15px;
+            font-weight: 700;
+        }
+        .workspace-page .brand-mark {
+            display: grid;
+            width: 36px;
+            height: 36px;
+            place-items: center;
+            border: 1px solid rgba(255,255,255,.16);
+            border-radius: 8px;
+            background: #315fcf;
+            color: #fff;
+            box-shadow: 0 6px 16px rgba(0,0,0,.24);
+            font-family: 'DM Mono', monospace;
+            font-size: 12px;
+        }
+        .workspace-page .brand-copy { display: flex; flex-direction: column; gap: 1px; }
+        .workspace-page .brand-copy small { color: #8e949f; font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: uppercase; }
+        .workspace-page .app-nav { display: grid; gap: 6px; align-items: stretch; }
+        .workspace-page .nav-label { margin: 0 10px 8px; color: #8e949f; font-size: 10px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
+        .workspace-page .app-nav a { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; color: #9ca2ad; font-size: 13px; font-weight: 600; }
+        .workspace-page .app-nav a i,
+        .workspace-page .app-nav a .rd-generated-icon { width: 18px; height: 18px; color: #727985; text-align: center; }
+        .workspace-page .app-nav a:hover, .workspace-page .app-nav a[aria-current="page"] { border-color: #343842; background: #24272e; color: #fff; }
+        .workspace-page .app-nav a:hover i,
+        .workspace-page .app-nav a:hover .rd-generated-icon,
+        .workspace-page .app-nav a[aria-current="page"] i,
+        .workspace-page .app-nav a[aria-current="page"] .rd-generated-icon { color: #91aff0; }
+        .workspace-page .entitlement-panel {
+            margin-top: auto;
+            padding: 14px;
+            border: 1px solid #343842;
+            border-radius: 8px;
+            background: #1d2026;
+            color: #fff;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+        }
+        .workspace-page .entitlement-panel + .app-account { margin-top: 12px; }
+        .workspace-page .entitlement-panel__header,
+        .workspace-page .entitlement-panel__identity { display: flex; align-items: center; }
+        .workspace-page .entitlement-panel__header { justify-content: space-between; gap: 8px; padding-bottom: 11px; border-bottom: 1px solid #30333a; }
+        .workspace-page .entitlement-panel__identity { min-width: 0; gap: 7px; font-size: 12px; font-weight: 700; }
+        .workspace-page .entitlement-panel__identity strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .workspace-page .entitlement-panel__identity i { color: #8faef0; }
+        .workspace-page .entitlement-status { flex: 0 0 auto; padding: 3px 6px; border: 1px solid rgba(143,174,240,.24); border-radius: 4px; background: rgba(73,112,194,.12); color: #a9c0ef; font-size: 11px; font-weight: 700; line-height: 1.2; }
+        .workspace-page .entitlement-metrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px 16px; margin: 12px 0 0; }
+        .workspace-page .entitlement-metrics div { min-width: 0; }
+        .workspace-page .entitlement-metrics dt { margin: 0; color: #9299a4; font-size: 11px; }
+        .workspace-page .entitlement-metrics dd { margin: 2px 0 0; color: #f4f5f7; font-family: 'DM Mono', monospace; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .workspace-page .entitlement-metrics__remaining dd { color: #a9c2f6; }
+        .workspace-page .entitlement-validity { display: grid; gap: 4px; margin-top: 12px; }
+        .workspace-page .entitlement-validity strong { color: #f4f5f7; font-size: 15px; }
+        .workspace-page .entitlement-validity span { color: #8f96a2; font-size: 11px; line-height: 1.5; }
+        .workspace-page .activation-form { display: grid; gap: 7px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #30333a; }
+        .workspace-page .activation-form label { color: #d7dae0; font-size: 11px; font-weight: 700; }
+        .workspace-page .activation-form__row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px; }
+        .workspace-page .activation-form input { width: 100%; min-width: 0; height: 34px; padding: 7px 9px; border: 1px solid #3b404a; border-radius: 6px; background: #17191e; color: #f4f5f7; font-family: 'DM Mono', monospace; font-size: 11px; text-transform: uppercase; outline: none; }
+        .workspace-page .activation-form input:focus { border-color: #7399e8; box-shadow: 0 0 0 3px rgba(90,130,214,.16); }
+        .workspace-page .activation-form button { min-height: 34px; padding: 6px 10px; border: 1px solid #5579c5; border-radius: 6px; background: #315fcf; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }
+        .workspace-page .activation-form button:hover { background: #3c6bd7; }
+        .workspace-page .activation-form > span { color: #777e89; font-size: 10px; line-height: 1.45; }
+        .workspace-page .entitlement-panel--expired,
+        .workspace-page .entitlement-panel--exhausted,
+        .workspace-page .entitlement-panel--unconfigured { border-color: rgba(201,73,88,.58); background: #1d2026; box-shadow: inset 3px 0 0 var(--ui-danger), inset 0 1px 0 rgba(255,255,255,.035); }
+        .workspace-page .entitlement-panel--expired .entitlement-panel__identity i,
+        .workspace-page .entitlement-panel--expired .entitlement-status,
+        .workspace-page .entitlement-panel--exhausted .entitlement-panel__identity i,
+        .workspace-page .entitlement-panel--exhausted .entitlement-status,
+        .workspace-page .entitlement-panel--unconfigured .entitlement-panel__identity i,
+        .workspace-page .entitlement-panel--unconfigured .entitlement-status,
+        .workspace-page .entitlement-panel--exhausted .entitlement-metrics__remaining dd,
+        .workspace-page .entitlement-panel--unconfigured .entitlement-metrics__remaining dd { color: #ef9da7; }
+        .workspace-page .entitlement-panel--expired .entitlement-status,
+        .workspace-page .entitlement-panel--exhausted .entitlement-status,
+        .workspace-page .entitlement-panel--unconfigured .entitlement-status { border-color: rgba(221,102,116,.32); background: rgba(201,73,88,.12); color: #ef9da7; }
+        .workspace-page .app-account { display: grid; grid-template-columns: 36px minmax(0,1fr) 32px 32px; gap: 8px; align-items: center; margin-top: auto; padding: 16px 8px 0; border-top: 1px solid #2d3037; }
+        .workspace-page .account-avatar { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 50%; background: #292d35; color: #c6d3ed; font-size: 12px; font-weight: 700; }
+        .workspace-page .account-copy { min-width: 0; }
+        .workspace-page .app-username { display: block; overflow: hidden; color: #fff; font-size: 12px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+        .workspace-page .account-role { display: block; color: #8e949f; font-size: 10px; }
+        .workspace-page .account-action, .workspace-page .logout-button { display: grid; width: 32px; height: 32px; padding: 0; place-items: center; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #8e949f; box-shadow: none; cursor: pointer; }
+        .workspace-page .account-action:hover, .workspace-page .logout-button:hover { border-color: #3a3e47; background: #262930; color: #fff; box-shadow: none; transform: none; }
+        .workspace-page .inline-form { display: contents; margin: 0; }
+        .workspace-title {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            width: min(1800px, calc(100% - 248px));
+            margin: 0 0 20px 248px;
+            padding: 36px 36px 0;
+            color: var(--ui-ink);
+            text-align: left;
+            font-size: 28px;
+            font-weight: 700;
+            line-height: 1.2;
+            letter-spacing: 0;
+        }
+        .workspace-title .eyebrow { color: #68717d; font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
+        .workspace-title i { color: var(--ui-accent); margin-right: 8px; }
+        .workspace-page #myForm { width: min(1800px, calc(100% - 248px)); margin-left: 248px; }
+        .workspace-page .builder-shell { margin: 0 36px; }
+        .workspace-page .builder-nav {
+            position: sticky;
+            top: 12px;
+            z-index: 12;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            padding: 7px;
+            border: 1px solid var(--ui-line);
+            border-radius: 8px;
+            background: rgba(255,255,255,.98);
+            box-shadow: 0 4px 14px rgba(20,24,32,.055);
+            backdrop-filter: blur(12px);
+        }
+        .workspace-page .builder-nav__links { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+        .workspace-page .builder-nav__links::-webkit-scrollbar { display: none; }
+        .workspace-page .builder-nav__links a {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            min-height: 36px;
+            padding: 0 11px;
+            border-radius: 6px;
+            color: #69717d;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .workspace-page .builder-nav__links a:hover,
+        .workspace-page .builder-nav__links a[aria-current="location"] { background: var(--ui-accent-soft); color: #284f9f; }
+        .workspace-page .builder-nav__links i { color: #8b929d; }
+        .workspace-page .builder-nav__links a:hover i,
+        .workspace-page .builder-nav__links a[aria-current="location"] i { color: var(--ui-accent); }
+        .workspace-page .builder-nav__tools { display: flex; flex: 0 0 auto; gap: 6px; margin-left: auto; }
+        .workspace-page .builder-nav__tools button {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            min-height: 36px;
+            padding: 0 11px;
+            border: 1px solid var(--ui-line);
+            border-radius: 6px;
+            background: var(--ui-subtle);
+            color: #4f5661;
+            box-shadow: none;
+            font-size: 12px;
+        }
+        .workspace-page .builder-nav__tools button:hover { border-color: #bfc5ce; background: #fff; color: #284f9f; transform: none; }
+        .workspace-page .builder-canvas {
+            overflow: clip;
+            border: 1px solid var(--ui-line);
+            border-radius: 8px;
+            background: var(--ui-surface);
+            box-shadow: 0 12px 30px rgba(20,24,32,.055);
+        }
+        .workspace-page .builder-section {
+            display: grid;
+            grid-template-columns: 150px minmax(0,1fr);
+            gap: 30px;
+            padding: 30px;
+            border-bottom: 1px solid #eceef1;
+            scroll-margin-top: 76px;
+        }
+        .workspace-page .builder-section[hidden] { display: none !important; }
+        .workspace-page .builder-section__header { align-self: start; }
+        .workspace-page .builder-section__index { display: block; margin-bottom: 8px; color: #68717d; font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 600; }
+        .workspace-page .builder-section__header h2 { margin: 0; color: #202329; font-size: 17px; font-weight: 700; line-height: 1.35; }
+        .workspace-page .builder-section__content { min-width: 0; }
+        .workspace-page .platform, .workspace-page .container { width: auto; max-width: none; margin: 0; padding: 0; gap: 26px; }
+        .workspace-page .platform.workspace-toolbar { display: grid; gap: 18px; padding: 0; border: 0; background: transparent; box-shadow: none; }
+        .workspace-page .platform-icons { display: grid; grid-template-columns: repeat(5, minmax(92px,1fr)); gap: 8px; margin: 0; }
+        .workspace-page .platform-icon {
+            display: grid;
+            grid-template-columns: 28px 1fr;
+            grid-template-rows: auto auto;
+            align-items: center;
+            width: 100%;
+            min-width: 0;
+            min-height: 64px;
+            padding: 9px 11px;
+            border: 1px solid var(--ui-line);
+            border-radius: 7px;
+            background: #fafbfc;
+            color: #626a76;
+            box-shadow: none;
+            text-align: left;
+            transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+        }
+        .workspace-page .platform-icon i { grid-row: 1 / 3; color: #858c96; font-size: 23px; text-align: center; }
+        .workspace-page .platform-icon span { overflow: hidden; color: inherit; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+        .workspace-page .platform-icon small { color: #68717d; font-size: 10px; font-weight: 600; }
+        .workspace-page .platform-icon:hover { border-color: #c5cad2; background: #fff; box-shadow: 0 4px 12px rgba(20,24,32,.05); transform: none; }
+        .workspace-page .platform-icon.active { border-color: var(--ui-accent); background: #fff; color: #274f9e; box-shadow: inset 0 0 0 1px var(--ui-accent), 0 5px 14px rgba(47,99,204,.10); transform: none; }
+        .workspace-page .platform-icon.active i { color: var(--ui-accent); }
+        .workspace-page #id_platform { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+        .workspace-page .container.form-grid { grid-template-columns: repeat(2, minmax(0,1fr)); align-items: start; }
+        .workspace-page .section { min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+        .workspace-page .section + .section { padding-left: 26px; border-left: 1px solid #eceef1; }
+        .workspace-page .container.form-grid > .section--full { grid-column: 1 / -1; margin-top: 2px; padding: 22px 0 0; border-top: 1px solid #eceef1; border-left: 0; }
+        .workspace-page .section-subtitle { display: flex; align-items: center; gap: 8px; margin: 0 0 18px; color: #30353c; font-size: 14px; font-weight: 700; }
+        .workspace-page .section-subtitle i { color: var(--ui-accent); }
+        .workspace-page .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); align-items: start; gap: 16px; }
+        .workspace-page .field-block { min-width: 0; }
+        .workspace-page .field-block--full { grid-column: 1 / -1; }
+        .workspace-page .field-block > label { margin-bottom: 7px; }
+        .workspace-page .field-block > .field-label { display: block; margin-bottom: 7px; color: #505762; font-size: 12px; font-weight: 600; }
+        .workspace-page .field-block > input,
+        .workspace-page .field-block > select,
+        .workspace-page .field-block > textarea { margin-bottom: 0; }
+        .workspace-page .advanced-server-options { padding-top: 2px; }
+        .workspace-page .advanced-server-options summary { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 42px; padding: 6px 2px; border-radius: 6px; color: #4e5865; font-size: 12px; font-weight: 700; cursor: pointer; outline: none; }
+        .workspace-page .advanced-server-options summary::before { color: var(--ui-accent); content: '+'; font-family: 'DM Mono', monospace; font-size: 15px; line-height: 1; }
+        .workspace-page .advanced-server-options[open] summary::before { content: '−'; }
+        .workspace-page .advanced-server-options summary:focus-visible { box-shadow: 0 0 0 3px rgba(47,99,204,.14); }
+        .workspace-page .advanced-server-options__content { margin-top: 12px; padding: 13px; border: 1px solid var(--ui-line); border-radius: 7px; background: #fafbfc; }
+        .workspace-page .advanced-server-options__content label { margin-bottom: 7px; }
+        .workspace-page .advanced-server-options__content input { margin-bottom: 0; }
+        .workspace-page #basicCustomFields > .field-grid:has(#androidAppIdField[hidden]) > .field-block:first-child { grid-column: 1 / -1; }
+        .workspace-page #build-basic .container.form-grid:has(> .section:nth-child(2)[hidden]) > .section:first-child { grid-column: 1 / -1; }
+        .workspace-page .toggle-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: 8px; }
+        .workspace-page .target-toggle-grid { grid-template-columns: 1fr; }
+        .workspace-page .option-toggle {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            min-height: 42px;
+            margin: 0;
+            padding: 10px 11px;
+            border: 1px solid var(--ui-line);
+            border-radius: 6px;
+            background: #fafbfc;
+            color: #565e69;
+            line-height: 1.45;
+        }
+        .workspace-page .option-toggle input { flex: 0 0 auto; margin: 2px 0 0; }
+        .workspace-page .option-stack { display: grid; gap: 8px; }
+        .workspace-page .option-stack .option-toggle { width: 100%; }
+        .workspace-page .option-toggle:has(input:checked),
+        .workspace-page .checkbox-group label:has(input:checked),
+        .workspace-page .desktop-behavior-toggle:has(input:checked) { border-color: #bbc7dc; background: #f3f6fb; color: #294f98; box-shadow: inset 2px 0 0 var(--ui-accent); }
+        .workspace-page .option-toggle:has(input:disabled),
+        .workspace-page .checkbox-group label:has(input:disabled),
+        .workspace-page .desktop-behavior-toggle:has(input:disabled) { opacity: .58; cursor: not-allowed; }
+        .workspace-page input[type="checkbox"], .workspace-page input[type="radio"] { accent-color: var(--ui-accent); }
+        .workspace-page .upload-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+        .workspace-page .upload-field { flex: 1 1 280px; min-width: 0; padding: 14px; border: 1px dashed #cfd4db; border-radius: 7px; background: var(--ui-subtle); }
+        .workspace-page .upload-field input[type="file"] { max-width: 100%; min-width: 0; margin: 8px 0 0; background: #fff; }
+        .workspace-page .preview-slot:empty { display: none; }
+        .workspace-page .preview-slot img { display: block; max-width: 100%; max-height: 72px; margin-top: 10px; }
+        .workspace-page .brand-options { margin: 18px 0 0; }
+        .workspace-page .permissions-heading { margin: 0 0 18px; }
+        .workspace-page .permissions-heading + .checkbox-group { margin-top: 0; }
+        .workspace-page .manual-settings { margin-top: 14px; }
+        .workspace-page .advanced-manual-section .manual-settings { margin-top: 0; }
+        .workspace-page .advanced-toggle-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+        .workspace-page .advanced-toggle-grid > .option-toggle { flex: 1 1 calc(50% - 4px); min-width: min(100%,220px); }
+        .workspace-page .manual-settings textarea { min-height: 132px; resize: vertical; }
+        .workspace-page .form-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; color: #284f9f; font-size: 12px; font-weight: 600; }
+        .workspace-page .form-link:hover { color: #1f438b; text-decoration: underline; }
+        .workspace-page .capability-note { display: flex; align-items: flex-start; gap: 9px; padding: 11px 13px; border: 1px solid var(--ui-line); border-radius: 6px; background: #f7f8fa; color: #5d6570; font-size: 12px; line-height: 1.55; }
+        .workspace-page .capability-note i { margin-top: 3px; color: var(--ui-accent); }
+        .workspace-page .delivery-card { padding: 16px; border: 1px solid var(--ui-line); border-radius: 8px; background: #fafbfc; }
+        .workspace-page .delivery-card + .delivery-card { margin-top: 12px; }
+        .workspace-page .delivery-card__title { display: flex; align-items: center; gap: 8px; margin: 0 0 5px; color: #30353c; font-size: 13px; font-weight: 700; }
+        .workspace-page .delivery-card__title i { color: var(--ui-accent); }
+        .workspace-page .delivery-card__hint { margin: 0 0 13px; color: #68717d; font-size: 11px; line-height: 1.55; }
+        .workspace-page .delivery-options { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+        .workspace-page .delivery-option { display: flex; align-items: flex-start; gap: 9px; min-height: 60px; margin: 0; padding: 10px 11px; border: 1px solid var(--ui-line); border-radius: 7px; background: #fff; color: #565e69; cursor: pointer; }
+        .workspace-page .delivery-option:has(input:checked) { border-color: #bbc7dc; background: #f3f6fb; color: #294f98; box-shadow: inset 2px 0 0 var(--ui-accent); }
+        .workspace-page .delivery-option input { margin-top: 3px; flex: 0 0 auto; }
+        .workspace-page .delivery-option strong { display: block; margin-bottom: 2px; color: inherit; font-size: 12px; }
+        .workspace-page .delivery-option small { display: block; color: #68717d; font-size: 10px; font-weight: 600; line-height: 1.45; }
+        .workspace-page .delivery-field { display: grid; grid-template-columns: minmax(130px, .8fr) minmax(0, 1.2fr); align-items: center; gap: 12px; margin-top: 13px; }
+        .workspace-page .delivery-field label { margin: 0; color: #505762; font-size: 12px; font-weight: 600; }
+        .workspace-page .delivery-field select { margin: 0; }
+        .workspace-page .delivery-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 13px; padding: 10px 11px; border: 1px solid var(--ui-line); border-radius: 7px; background: #f7f8fa; color: #5d6570; font-size: 11px; line-height: 1.55; }
+        .workspace-page .delivery-note i { margin-top: 3px; color: var(--ui-accent); }
+        @media (max-width: 640px) { .workspace-page .delivery-options, .workspace-page .delivery-field { grid-template-columns: 1fr; } }
+        .workspace-page #id_direction { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 7px; margin: 0; padding: 0; }
+        .workspace-page #id_direction > div label { display: flex; align-items: center; min-height: 40px; margin: 0; padding: 8px 10px; border: 1px solid var(--ui-line); border-radius: 6px; background: #fafbfc; color: #565e69; }
+        .workspace-page label { color: #505762; font-size: 12px; font-weight: 600; }
+        .workspace-page input[type="text"], .workspace-page input[type="password"], .workspace-page input[type="number"], .workspace-page select, .workspace-page textarea { min-height: 42px; padding: 9px 11px; border: 1px solid var(--ui-line-strong); border-radius: 7px; background: #fff; color: var(--ui-ink); box-shadow: inset 0 1px 2px rgba(20,24,32,.025); }
+        .workspace-page input[type="text"]:focus, .workspace-page input[type="password"]:focus, .workspace-page input[type="number"]:focus, .workspace-page select:focus, .workspace-page textarea:focus { border-color: #5278c8; box-shadow: 0 0 0 3px rgba(47,99,204,.11); }
+        .workspace-page input[type="file"] { border-color: var(--ui-line-strong); background: var(--ui-subtle); }
+        .workspace-page .checkbox-group { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+        .workspace-page .checkbox-group label, .workspace-page .desktop-behavior-toggle { border-color: var(--ui-line); background: #fafbfc; color: #565e69; }
+        .workspace-page .help-text { display: block; margin: 6px 0 0; border: 0; background: transparent; color: #68717d; padding: 0; font-size: 11px; }
+        .workspace-page .action-bar { position: static; margin: 0; padding: 0; border-top: 1px solid var(--ui-line); background: #f7f8fa; }
+        .workspace-page .action-bar .section { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 30px; border-top: 0; }
+        .workspace-page .action-bar button { min-width: 250px; border-radius: 8px; transition: background-color .16s ease, box-shadow .16s ease; }
+        .workspace-page .action-bar button:not(:disabled) { background: #2d60c8; box-shadow: 0 6px 14px rgba(45,96,200,.18); }
+        .workspace-page .action-bar button:not(:disabled):hover { background: #2858ba; box-shadow: 0 8px 18px rgba(45,96,200,.22); transform: none; }
+        .workspace-page .action-bar button:disabled { background: #69717d; color: #fff; cursor: not-allowed; box-shadow: none; opacity: 1; transform: none; }
+        .workspace-page .action-bar button:disabled:hover { background: #69717d; box-shadow: none; transform: none; }
+        .workspace-page .build-summary { color: #606874; font-size: 12px; font-weight: 600; }
+        .workspace-page .errorlist { display: grid; width: auto; max-width: none; margin: 0 36px 16px; justify-content: stretch; align-items: start; gap: 4px; padding: 13px 15px; border-color: #ebc4c9; border-radius: 8px; background: #fff5f6; color: #b73d4b; }
+        .workspace-page .workspace-messages { display: grid; width: min(1800px, calc(100% - 248px)); gap: 8px; margin: 0 0 16px 248px; padding: 0 36px; list-style: none; }
+        .workspace-page .workspace-message { padding: 11px 14px; border: 1px solid #c8d7f3; border-radius: 7px; background: #f4f7ff; color: #35558d; font-size: 12px; font-weight: 600; }
+        .workspace-page .workspace-message.success { border-color: #b9dfca; background: #f1fbf6; color: #176d48; }
+        .workspace-page .workspace-message.error { border-color: #ebc4c9; background: #fff5f6; color: #b73d4b; }
+        .workspace-page .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+
+        .workspace-page a:focus-visible,
+        .workspace-page button:focus-visible,
+        .workspace-page label:has(input:focus-visible) {
+            outline: 2px solid #315fcf;
+            outline-offset: 2px;
+        }
+
+        @media (max-width: 1120px) {
+            .workspace-page .app-header { position: static; width: auto; border-right: 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+            .workspace-page .app-header__inner { display: grid; grid-template-columns: 1fr auto; min-height: 0; padding: 14px 16px; }
+            .workspace-page .app-brand { padding: 0; }
+            .workspace-page .app-nav { grid-column: 1 / -1; grid-row: 2; display: flex; overflow-x: auto; gap: 5px; padding-top: 8px; }
+            .workspace-page .nav-label { display: none; }
+            .workspace-page .app-nav a { min-height: 36px; padding: 0 10px; white-space: nowrap; }
+            .workspace-page .entitlement-panel { grid-column: 1 / -1; grid-row: 3; margin: 10px 0 0; padding: 12px 14px; }
+            .workspace-page .entitlement-panel + .app-account { margin: 0; }
+            .workspace-page .entitlement-metrics { grid-template-columns: repeat(4,minmax(0,1fr)); margin-top: 10px; }
+            .workspace-page .entitlement-validity { grid-template-columns: auto 1fr; align-items: baseline; gap: 12px; margin-top: 8px; }
+            .workspace-page .entitlement-validity span { text-align: right; }
+            .workspace-page .app-account { grid-column: 2; grid-row: 1; margin: 0; padding: 0; border: 0; grid-template-columns: 30px auto; }
+            .workspace-page .account-copy, .workspace-page .account-action { display: none; }
+            .workspace-page .account-avatar { width: 30px; height: 30px; }
+            .workspace-page .logout-button { width: 30px; height: 30px; }
+            .workspace-title, .workspace-page #myForm { width: auto; margin-left: 0; }
+            .workspace-page .workspace-messages { width: auto; margin: 0 18px 16px; padding: 0; }
+            .workspace-title { margin: 0 18px 20px; padding: 28px 0 0; font-size: 26px; }
+            .workspace-title > span:last-child { font-size: 22px; line-height: 1.3; }
+            .workspace-page .platform, .workspace-page .container { margin-inline: 0; }
+            .workspace-page .container.form-grid { grid-template-columns: 1fr; }
+            .workspace-page .action-bar { position: static; }
+            .workspace-page .action-bar .section { justify-content: stretch; }
+            .workspace-page .action-bar button { width: 100%; min-width: 0; }
+            .workspace-page .builder-shell { margin-inline: 18px; }
+            .workspace-page .builder-section { grid-template-columns: 1fr; gap: 18px; padding: 24px; }
+            .workspace-page .builder-section__header { display: flex; align-items: baseline; gap: 10px; }
+            .workspace-page .builder-section__index { margin: 0; }
+            .workspace-page .section + .section { padding: 22px 0 0; border-top: 1px solid #e7edf5; border-left: 0; }
+            .workspace-page .platform-icons { grid-template-columns: repeat(5,minmax(80px,1fr)); overflow-x: auto; }
+        }
+        @media (max-width: 560px) {
+            .workspace-title { margin-inline: 12px; font-size: 24px; }
+            .workspace-title > span:last-child { font-size: 21px; }
+            .workspace-page .platform, .workspace-page .container { margin-inline: 0; }
+            .workspace-page .builder-shell { margin-inline: 12px; }
+            .workspace-page .builder-nav { top: 6px; gap: 6px; padding: 5px; }
+            .workspace-page .builder-nav__links a { padding-inline: 9px; }
+            .workspace-page .builder-nav__tools button { width: 44px; min-height: 44px; padding: 0; justify-content: center; }
+            .workspace-page .builder-nav__tools button span { display: none; }
+            .workspace-page .builder-section { padding: 20px 16px; }
+            .workspace-page .field-grid, .workspace-page .toggle-grid, .workspace-page .checkbox-group { grid-template-columns: 1fr; }
+            .workspace-page .checkbox-group > label:last-child { grid-column: auto; }
+            .workspace-page .platform-icons { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; overflow: visible; padding-bottom: 3px; }
+            .workspace-page .platform-icon { grid-template-columns: 1fr; grid-template-rows: 24px auto auto; justify-items: center; min-height: 76px; padding: 8px 5px; text-align: center; }
+            .workspace-page .platform-icon i { grid-row: auto; }
+            .workspace-page .platform-icon span { overflow: visible; font-size: 11px; text-overflow: clip; }
+            .workspace-page #id_direction { grid-template-columns: 1fr; }
+            .workspace-page .desktop-behavior-field--primary, .workspace-page .desktop-behavior-size { grid-template-columns: 1fr; }
+            .workspace-page .action-bar .section { align-items: stretch; flex-direction: column; padding: 16px; }
+            .workspace-page .entitlement-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+            .workspace-page .entitlement-validity { grid-template-columns: 1fr; gap: 3px; }
+            .workspace-page .entitlement-validity span { text-align: left; }
+        }
+
+        @media (min-width: 561px) {
+            .workspace-page .checkbox-group > label:last-child:nth-child(3n + 1) { grid-column: 2; }
+        }
+      </style>
+</head>
+<body class="workspace-page">
+    {% include "includes/app_header.html" %}
+    <h1 class="workspace-title"><span class="eyebrow">BUILD WORKSPACE</span><span><i class="fas fa-cogs"></i> RustDesk 自定义客户端生成器</span></h1>
+    {% if messages %}
+        <ul class="workspace-messages" aria-live="polite">
+            {% for message in messages %}<li class="workspace-message {{ message.tags }}">{{ message }}</li>{% endfor %}
+        </ul>
+    {% endif %}
+    <form id="myForm" action="/generator" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {{ form.formSchemaVersion }}
+        {% if form.errors %}
+            <div class="errorlist" role="alert" tabindex="-1">
+                <strong>请修正以下内容：</strong>
+                {% for field in form %}
+                    {% for error in field.errors %}
+                        <div data-error-field="{{ field.name }}">{{ field.label|default:field.name }}：{{ error }}</div>
+                    {% endfor %}
+                {% endfor %}
+                {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+        <div class="builder-shell">
+            <nav class="builder-nav" aria-label="配置分区">
+                <div class="builder-nav__links">
+                    <a href="#build-target" data-section-link><i class="fas fa-desktop" aria-hidden="true"></i> 构建目标</a>
+                    <a href="#build-basic" data-section-link><i class="fas fa-sliders-h" aria-hidden="true"></i> 基础与服务器</a>
+                    <a href="#build-security" data-section-link><i class="fas fa-shield-alt" aria-hidden="true"></i> 安全</a>
+                    <a href="#build-brand" data-section-link><i class="fas fa-paint-brush" aria-hidden="true"></i> 品牌</a>
+                    <a href="#build-permissions" data-section-link><i class="fas fa-lock" aria-hidden="true"></i> 权限</a>
+                    <a href="#build-advanced" data-section-link><i class="fas fa-code" aria-hidden="true"></i> 高级</a>
+                    <a href="#build-delivery" data-section-link><i class="fas fa-share-nodes" aria-hidden="true"></i> 交付</a>
+                </div>
+                <div class="builder-nav__tools">
+                    <button type="button" onclick="saveFormData()" title="保存配置" aria-label="保存配置"><i class="fas fa-download" aria-hidden="true"></i><span>保存</span></button>
+                    <input type="file" id="fileInput" class="visually-hidden" accept=".json">
+                    <button type="button" onclick="loadFormData()" title="导入配置" aria-label="导入配置"><i class="fas fa-upload" aria-hidden="true"></i><span>导入</span></button>
+                </div>
+            </nav>
+
+            <div class="builder-canvas">
+                <section id="build-target" class="builder-section">
+                    <header class="builder-section__header">
+                        <span class="builder-section__index">01</span>
+                        <h2>构建目标</h2>
+                    </header>
+                    <div class="builder-section__content">
+                        <div class="platform workspace-toolbar">
+                            <div class="platform-icons" aria-label="生成平台">
+                                <button type="button" class="platform-icon active" data-platform="windows" aria-pressed="true"><i class="fab fa-windows" aria-hidden="true"></i><span>Windows</span><small>64 位</small></button>
+                                <button type="button" class="platform-icon" data-platform="windows-x86" aria-pressed="false"><i class="fab fa-windows" aria-hidden="true"></i><span>Windows</span><small>32 位</small></button>
+                                <button type="button" class="platform-icon" data-platform="linux" aria-pressed="false"><i class="fab fa-linux" aria-hidden="true"></i><span>Linux</span><small>桌面端</small></button>
+                                <button type="button" class="platform-icon" data-platform="android" aria-pressed="false"><i class="fab fa-android" aria-hidden="true"></i><span>Android</span><small>移动端</small></button>
+                                <button type="button" class="platform-icon" data-platform="macos" aria-pressed="false"><i class="fab fa-apple" aria-hidden="true"></i><span>macOS</span><small>桌面端</small></button>
+                            </div>
+                            <label class="visually-hidden" for="{{ form.platform.id_for_label }}">生成平台</label>
+                            {{ form.platform }}
+                            <div class="field-grid">
+                                <div class="field-block">
+                                    <label for="{{ form.version.id_for_label }}">RustDesk 版本</label>
+                                    {{ form.version }}
+                                    {% if form.version.help_text %}<span class="help-text">{{ form.version.help_text }}</span>{% endif %}
+                                </div>
+                                <div class="field-block">
+                                    <span class="field-label">附加选项</span>
+                                    <div class="toggle-grid target-toggle-grid">
+                                        <label id="delayFixOption" class="option-toggle" for="{{ form.delayFix.id_for_label }}">{{ form.delayFix }} 修复第三方 API 连接延迟</label>
+                                        <label id="beijingCustomOption" class="option-toggle" for="{{ form.beijingCustom.id_for_label }}" hidden>{{ form.beijingCustom }} 北京 Linux 定制</label>
+                                        <label id="smartMultiRelayOption" class="option-toggle" for="{{ form.smartMultiRelay.id_for_label }}">{{ form.smartMultiRelay }} 智能多中继（严格 WSS）</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="linuxCapabilityNotice" class="capability-note" hidden>
+                                <i class="fas fa-info-circle" aria-hidden="true"></i>
+                                <span>标准 Linux 构建仅使用配置名称；需要服务器、品牌和权限定制时，请开启“北京 Linux 定制”。</span>
+                            </div>
+                            <div id="smartMultiRelayNotice" class="capability-note" hidden>
+                                <i class="fas fa-shield-alt" aria-hidden="true"></i>
+                                <span>要求 RustDesk 1.4.9、域名形式的 hbbs、受信任证书和 HTTPS API；构建会强制 WSS 并禁用不安全 TLS 回退。</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="build-basic" class="builder-section">
+                    <header class="builder-section__header">
+                        <span class="builder-section__index">02</span>
+                        <h2>基础与服务器</h2>
+                    </header>
+                    <div class="builder-section__content">
+                        <div class="container form-grid">
+                            <div class="section">
+                                <h3 class="section-subtitle"><i class="fas fa-sliders-h" aria-hidden="true"></i> 基础信息</h3>
+                                <div class="field-grid">
+                                    <div class="field-block field-block--full">
+                                        <label for="{{ form.exename.id_for_label }}">配置名称</label>
+                                        {{ form.exename }}
+                                        <span class="help-text">仅限英文、数字、下划线或连字符，不能包含空格。</span>
+                                        <span id="filenameError" class="error"></span>
+                                    </div>
+                                    <div id="basicCustomFields" class="field-block field-block--full linux-custom-content">
+                                        <div class="field-grid">
+                                            <div class="field-block">
+                                                <label for="{{ form.appname.id_for_label }}">应用名称</label>
+                                                {{ form.appname }}
+                                                <span class="help-text">留空则使用 RustDesk 默认名称。</span>
+                                            </div>
+                                            <div id="androidAppIdField" class="field-block">
+                                                <label for="{{ form.androidappid.id_for_label }}">Android App ID</label>
+                                                {{ form.androidappid }}
+                                                <span class="help-text">仅 Android 构建使用，留空即为默认 ID。</span>
+                                            </div>
+                                            <div class="field-block field-block--full">
+                                                <label for="{{ form.direction.id_for_label }}">连接类型</label>
+                                                {{ form.direction }}
+                                            </div>
+                                            <div class="field-block">
+                                                <label for="{{ form.installation.id_for_label }}">安装能力</label>
+                                                {{ form.installation }}
+                                            </div>
+                                            <div class="field-block">
+                                                <label for="{{ form.settings.id_for_label }}">设置入口</label>
+                                                {{ form.settings }}
+                                            </div>
+                                        </div>
+
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="section linux-custom-content">
+                                <h3 class="section-subtitle"><i class="fas fa-server" aria-hidden="true"></i> 自定义服务器</h3>
+                                <div class="field-grid">
+                                    <div class="field-block">
+                                        <label for="{{ form.serverIP.id_for_label }}">ID 服务器</label>
+                                        {{ form.serverIP }}
+                                        <span class="help-text">填写 hbbs 地址，可包含端口。</span>
+                                    </div>
+                                    <div class="field-block">
+                                        <label for="{{ form.key.id_for_label }}">服务器密钥</label>
+                                        {{ form.key }}
+                                    </div>
+                                    <div class="field-block field-block--full">
+                                        <label for="{{ form.apiServer.id_for_label }}">API 地址</label>
+                                        {{ form.apiServer }}
+                                        <span class="help-text">留空时按 ID 服务器的主机名自动使用 21114 端口。</span>
+                                    </div>
+                                    <details id="relayServerOptions" class="advanced-server-options field-block field-block--full"{% if form.relayServer.value or form.relayServer.errors %} open{% endif %}>
+                                        <summary>高级：固定中继服务器</summary>
+                                        <div class="advanced-server-options__content">
+                                            <label for="{{ form.relayServer.id_for_label }}">固定中继服务器</label>
+                                            {{ form.relayServer }}
+                                            <span class="help-text">通常留空，由 ID 服务器选择健康中继；填写后将强制使用单个 hbbr，不能填写逗号分隔的列表。</span>
+                                        </div>
+                                    </details>
+                                    <div class="field-block field-block--full">
+                                        <label for="{{ form.urlLink.id_for_label }}">站内链接地址</label>
+                                        {{ form.urlLink }}
+                                        <span class="help-text">替换客户端中的 https://rustdesk.com。</span>
+                                    </div>
+                                    <div class="field-block field-block--full">
+                                        <label for="{{ form.downloadLink.id_for_label }}">更新下载地址</label>
+                                        {{ form.downloadLink }}
+                                        <span class="help-text">替换客户端中的 https://rustdesk.com/download。</span>
+                                    </div>
+                                    <div class="field-block field-block--full">
+                                        <label for="{{ form.compname.id_for_label }}">版权公司名称</label>
+                                        {{ form.compname }}
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="desktopBehaviorSection" class="section section--full desktop-behavior-section linux-custom-content">
+                                <h3 class="section-subtitle"><i class="fas fa-window-maximize" aria-hidden="true"></i> 桌面端行为</h3>
+                                <div class="desktop-behavior-grid">
+                                    <div class="desktop-behavior-field desktop-behavior-field--primary">
+                                        <label for="{{ form.defaultViewStyle.id_for_label }}">默认显示方式</label>
+                                        {{ form.defaultViewStyle }}
+                                    </div>
+                                    <div class="desktop-behavior-options">
+                                        <label class="desktop-behavior-toggle" for="{{ form.removeSetupServerTip.id_for_label }}">
+                                            {{ form.removeSetupServerTip }} 隐藏底部“自建服务器”提示
+                                        </label>
+                                        <label id="hideNetworkSettingOption" class="desktop-behavior-toggle" for="{{ form.hideNetworkSetting.id_for_label }}">
+                                            {{ form.hideNetworkSetting }} 隐藏设置里的“网络”入口
+                                        </label>
+                                        <label id="silentInstallOption" class="desktop-behavior-toggle" for="{{ form.silentInstallOnDoubleClick.id_for_label }}">
+                                            {{ form.silentInstallOnDoubleClick }} Windows 安装包双击后静默安装
+                                        </label>
+                                        <div id="silentAgentModeOption" class="option-stack">
+                                            <label class="desktop-behavior-toggle" for="{{ form.silentAgentMode.id_for_label }}">
+                                                {{ form.silentAgentMode }} 隐藏主窗口并静默运行
+                                            </label>
+                                            <span class="help-text">仅用于已获授权的 Windows 设备。启用后自动静默安装、隐藏托盘和连接管理窗口，不创建桌面快捷方式；Windows 服务、日志和卸载入口仍保留。</span>
+                                        </div>
+                                        <label id="copyIdPasswordButtonOption" class="desktop-behavior-toggle" for="{{ form.copyIdPasswordButton.id_for_label }}">
+                                            {{ form.copyIdPasswordButton }} ID 旁增加复制按钮
+                                        </label>
+                                        <label id="manualTemporaryPasswordOption" class="desktop-behavior-toggle" for="{{ form.manualTemporaryPassword.id_for_label }}">
+                                            {{ form.manualTemporaryPassword }} 允许手动设置临时密码
+                                        </label>
+                                        <label id="startOnBootOption" class="desktop-behavior-toggle" for="{{ form.showStartOnBootCheckbox.id_for_label }}">
+                                            {{ form.showStartOnBootCheckbox }} 显示开机自启选项
+                                        </label>
+                                    </div>
+                                    <div id="incomingCompactWrapper" class="desktop-behavior-compact-field">
+                                        <label class="desktop-behavior-toggle" for="{{ form.incomingCompactMode.id_for_label }}">
+                                            {{ form.incomingCompactMode }} 仅被控紧凑布局
+                                        </label>
+                                        <span class="help-text">用于仅允许被控的 Windows 64 位、Linux 和 macOS 客户端。</span>
+                                        <div id="incomingCompactDetails" class="desktop-behavior-size" hidden>
+                                            <div class="desktop-behavior-field">
+                                                <label for="{{ form.incomingContentWidth.id_for_label }}">窗口内容宽度</label>
+                                                {{ form.incomingContentWidth }}
+                                            </div>
+                                            <div class="desktop-behavior-field">
+                                                <label for="{{ form.incomingContentHeight.id_for_label }}">窗口内容高度</label>
+                                                {{ form.incomingContentHeight }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="build-security" class="builder-section linux-custom-content">
+                    <header class="builder-section__header">
+                        <span class="builder-section__index">03</span>
+                        <h2>安全</h2>
+                    </header>
+                    <div class="builder-section__content">
+                        <div class="field-grid">
+                            <div class="field-block">
+                                <label for="{{ form.passApproveMode.id_for_label }}">连接确认方式</label>
+                                {{ form.passApproveMode }}
+                                <input id="hidecmForcedApproveMode" type="hidden" name="passApproveMode" value="password" disabled>
+                            </div>
+                            <div class="field-block">
+                                <label for="{{ form.permanentPassword.id_for_label }}">固定密码</label>
+                                {{ form.permanentPassword }}
+                                <span class="help-text">作为客户端默认密码，客户端用户仍可修改。</span>
+                                <div id="passwordRequirement" class="password-requirement">默认隐藏连接窗口时必须设置固定密码。</div>
+                            </div>
+                            <div class="toggle-grid field-block--full">
+                                <label class="option-toggle" for="{{ form.denyLan.id_for_label }}">{{ form.denyLan }} 禁用局域网发现</label>
+                                <label class="option-toggle" for="{{ form.enableDirectIP.id_for_label }}">{{ form.enableDirectIP }} 启用直接 IP 访问</label>
+                                <label class="option-toggle" for="{{ form.autoClose.id_for_label }}">{{ form.autoClose }} 无操作时自动关闭传入会话</label>
+                                <div id="hidecmOption" class="option-stack">
+                                    <label class="option-toggle" for="{{ form.hidecm.id_for_label }}">{{ form.hidecm }} 启用隐藏连接窗口功能</label>
+                                    <div id="hidecmDefaultEnabledWrapper" hidden>
+                                        <label class="option-toggle" for="{{ form.hidecmDefaultEnabled.id_for_label }}">{{ form.hidecmDefaultEnabled }} 构建后默认开启</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="build-brand" class="builder-section linux-custom-content">
+                    <header class="builder-section__header">
+                        <span class="builder-section__index">04</span>
+                        <h2>品牌</h2>
+                    </header>
+                    <div class="builder-section__content">
+                        {{ form.iconbase64.as_hidden }}
+                        {{ form.logobase64.as_hidden }}
+                        {{ form.privacybase64.as_hidden }}
+                        <div class="upload-grid">
+                            <div class="upload-field">
+                                <label for="{{ form.iconfile.id_for_label }}">应用图标（PNG）</label>
+                                {{ form.iconfile }}
+                                <div id="icon-preview" class="preview-slot"></div>
+                            </div>
+                            <div id="logoOption" class="upload-field">
+                                <label for="{{ form.logofile.id_for_label }}">应用 Logo（PNG）</label>
+                                {{ form.logofile }}
+                                <div id="logo-preview" class="preview-slot"></div>
+                            </div>
+                            <div id="privacyOption" class="upload-field">
+                                <label for="{{ form.privacyfile.id_for_label }}">隐私屏幕（PNG）</label>
+                                {{ form.privacyfile }}
+                                <div id="privacy-preview" class="preview-slot"></div>
+                            </div>
+                        </div>
+                        <div class="field-grid brand-options">
+                            <div class="field-block">
+                                <label for="{{ form.theme.id_for_label }}">主题</label>
+                                {{ form.theme }}
+                            </div>
+                            <div class="field-block">
+                                <label for="{{ form.themeDorO.id_for_label }}">主题策略</label>
+                                {{ form.themeDorO }}
+                                <span class="help-text">默认允许客户端修改，强制覆盖则锁定主题。</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="build-permissions" class="builder-section linux-custom-content">
+                    <header class="builder-section__header">
+                        <span class="builder-section__index">05</span>
+                        <h2>权限</h2>
+                    </header>
+                    <div class="builder-section__content">
+                        <div class="field-grid permissions-heading">
+                            <div class="field-block">
+                                <label for="{{ form.permissionsDorO.id_for_label }}">权限策略</label>
+                                {{ form.permissionsDorO }}
+                            </div>
+                            <div class="field-block">
+                                <label for="{{ form.permissionsType.id_for_label }}">权限类型</label>
+                                {{ form.permissionsType }}
+                            </div>
+                        </div>
+                        <div class="checkbox-group">
+                            <label for="{{ form.enableKeyboard.id_for_label }}">{{ form.enableKeyboard }} 键盘/鼠标</label>
+                            <label for="{{ form.enableClipboard.id_for_label }}">{{ form.enableClipboard }} 剪贴板</label>
+                            <label for="{{ form.enableFileCopyPaste.id_for_label }}">{{ form.enableFileCopyPaste }} 文件复制粘贴</label>
+                            <label for="{{ form.enableFileTransfer.id_for_label }}">{{ form.enableFileTransfer }} 文件传输</label>
+                            <label for="{{ form.enableAudio.id_for_label }}">{{ form.enableAudio }} 音频</label>
+                            <label for="{{ form.enableTCP.id_for_label }}">{{ form.enableTCP }} TCP 隧道</label>
+                            <label for="{{ form.enableRemoteRestart.id_for_label }}">{{ form.enableRemoteRestart }} 远程重启</label>
+                            <label for="{{ form.enableRecording.id_for_label }}">{{ form.enableRecording }} 会话录制</label>
+                            <label for="{{ form.enableBlockingInput.id_for_label }}">{{ form.enableBlockingInput }} 阻止本地输入</label>
+                            <label for="{{ form.enableRemoteModi.id_for_label }}">{{ form.enableRemoteModi }} 远程修改配置</label>
+                            <label for="{{ form.enablePrinter.id_for_label }}">{{ form.enablePrinter }} 远程打印机</label>
+                            <label for="{{ form.enableCamera.id_for_label }}">{{ form.enableCamera }} 远程摄像头</label>
+                            <label for="{{ form.enableTerminal.id_for_label }}">{{ form.enableTerminal }} 远程终端</label>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="build-advanced" class="builder-section linux-custom-content">
+                    <header class="builder-section__header">
+                        <span class="builder-section__index">06</span>
+                        <h2>高级</h2>
+                    </header>
+                    <div class="builder-section__content">
+                        <div class="container form-grid">
+                            <div class="section">
+                                <h3 class="section-subtitle"><i class="fas fa-code" aria-hidden="true"></i> 代码增强</h3>
+                                <div class="toggle-grid advanced-toggle-grid">
+                                    <label id="cycleMonitorOption" class="option-toggle" for="{{ form.cycleMonitor.id_for_label }}">{{ form.cycleMonitor }} 添加显示器切换按钮</label>
+                                    <label id="xOfflineOption" class="option-toggle" for="{{ form.xOffline.id_for_label }}">{{ form.xOffline }} 离线设备显示 X 标记</label>
+                                    <label id="removeNewVersionNotifOption" class="option-toggle" for="{{ form.removeNewVersionNotif.id_for_label }}">{{ form.removeNewVersionNotif }} 移除新版本通知</label>
+                                    <label id="hideSettingsMenuOption" class="option-toggle" for="{{ form.hideSettingsMenu.id_for_label }}">{{ form.hideSettingsMenu }} 隐藏右上角三点菜单</label>
+                                    <label id="removeRecentSessionsOption" class="option-toggle" for="{{ form.removeRecentSessions.id_for_label }}">{{ form.removeRecentSessions }} 移除最近访问记录</label>
+                                    <label id="forceDisableFileTransferOption" class="option-toggle" for="{{ form.forceDisableFileTransfer.id_for_label }}">{{ form.forceDisableFileTransfer }} 从源码禁用文件传输</label>
+                                </div>
+                            </div>
+                            <div class="section">
+                                <h3 class="section-subtitle"><i class="fas fa-cog" aria-hidden="true"></i> 其他设置</h3>
+                                <div class="option-stack">
+                                    <label id="hideTrayOption" class="option-toggle" for="{{ form.hideTray.id_for_label }}">{{ form.hideTray }} 隐藏系统托盘图标</label>
+                                    <label class="option-toggle" for="{{ form.removeWallpaper.id_for_label }}">{{ form.removeWallpaper }} 传入会话期间移除壁纸</label>
+                                </div>
+                                <a class="form-link" href="https://rustdesk.com/docs/en/self-host/client-configuration/advanced-settings/" target="_blank" rel="noopener noreferrer">查看默认/覆盖配置项列表 <i class="fas fa-external-link-alt" aria-hidden="true"></i></a>
+                            </div>
+                            <div class="section section--full advanced-manual-section">
+                                <h3 class="section-subtitle"><i class="fas fa-sliders-h" aria-hidden="true"></i> 手动配置</h3>
+                                <div class="field-grid manual-settings">
+                                    <div class="field-block">
+                                        <label for="{{ form.defaultManual.id_for_label }}">默认设置</label>
+                                        {{ form.defaultManual }}
+                                    </div>
+                                    <div class="field-block">
+                                        <label for="{{ form.overrideManual.id_for_label }}">覆盖设置</label>
+                                        {{ form.overrideManual }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="build-delivery" class="builder-section">
+                    <header class="builder-section__header">
+                        <span class="builder-section__index">07</span>
+                        <h2>交付</h2>
+                    </header>
+                    <div class="builder-section__content">
+                        <div class="delivery-card">
+                            <h3 class="delivery-card__title"><i class="fas fa-link" aria-hidden="true"></i> 下载权限</h3>
+                            <p class="delivery-card__hint">每次生成单独设置。链接只允许访问本次生成的安装包，不会改变客户端中的更新下载地址。</p>
+                            <div class="delivery-options" role="radiogroup" aria-label="下载权限">
+                                <label class="delivery-option" for="deliveryAccessLogin">
+                                    <input id="deliveryAccessLogin" type="radio" name="download_access" value="login"{% if form.download_access.value == 'login' or not form.download_access.value %} checked{% endif %}>
+                                    <span><strong>登录后下载</strong><small>仅生成者与管理员可以打开链接</small></span>
+                                </label>
+                                <label class="delivery-option" for="deliveryAccessPublic">
+                                    <input id="deliveryAccessPublic" type="radio" name="download_access" value="public"{% if form.download_access.value == 'public' %} checked{% endif %}>
+                                    <span><strong>无需登录</strong><small>拿到链接即可下载，直到链接过期</small></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="delivery-card">
+                            <h3 class="delivery-card__title"><i class="fas fa-clock" aria-hidden="true"></i> 链接有效期</h3>
+                            <p class="delivery-card__hint">从第一个安装包上传成功开始计时，服务器上的安装包最多保留 7 天。</p>
+                            <div class="delivery-field">
+                                <label for="{{ form.download_ttl_hours.id_for_label }}">保存时间</label>
+                                {{ form.download_ttl_hours }}
+                            </div>
+                            <div class="delivery-note"><i class="fas fa-shield-halved" aria-hidden="true"></i><span>可选 1 小时、1 天、3 天或 7 天。链接过期后不能继续下载，清理任务会移除服务器文件。</span></div>
+                        </div>
+                    </div>
+                </section>
+
+                <div class="platform action-bar">
+                    <div class="section form-actions">
+                        <span id="buildSummary" class="build-summary">Windows 64 位 · 1.4.9 · 登录后下载 · 保存 7 天</span>
+                        <button id="generateSubmit" type="submit"{% if entitlement_summary and not entitlement_summary.can_generate %} disabled aria-disabled="true" title="{% if entitlement_summary.block_reason == 'count_unconfigured' %}请先填写激活码开通会员{% elif entitlement_summary.block_reason == 'count_exhausted' %}当前套餐的生成次数已用尽{% elif entitlement_summary.block_reason == 'time_expired' %}当前会员有效期已结束{% endif %}"{% endif %}><span class="rd-generated-icon rd-generated-icon--generate" aria-hidden="true"></span> {% if entitlement_summary %}{{ entitlement_summary.submit_label }}{% else %}生成自定义客户端{% endif %}</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+    <script>
+        const platformSelect = document.getElementById('id_platform');
+        const versionSelect = document.getElementById('id_version');
+        const desktopPlatforms = new Set(['windows', 'windows-x86', 'linux', 'macos']);
+        const flutterDesktopPlatforms = new Set(['windows', 'linux', 'macos']);
+        const compactLayoutPlatforms = new Set(['windows', 'linux', 'macos']);
+        const windowsPlatforms = new Set(['windows', 'windows-x86']);
+        const beijingLinuxVersions = new Set(['1.4.7', '1.4.8', '1.4.9']);
+        const beijingCustomOption = document.getElementById('beijingCustomOption');
+        const beijingCustomToggle = document.getElementById("{{ form.beijingCustom.id_for_label }}");
+        const smartMultiRelayOption = document.getElementById('smartMultiRelayOption');
+        const smartMultiRelayNotice = document.getElementById('smartMultiRelayNotice');
+        const delayFixOption = document.getElementById('delayFixOption');
+        const linuxCapabilityNotice = document.getElementById('linuxCapabilityNotice');
+        const linuxCustomContent = document.querySelectorAll('.linux-custom-content');
+        const androidAppIdField = document.getElementById('androidAppIdField');
+        const desktopBehaviorSection = document.getElementById('desktopBehaviorSection');
+        const silentInstallOption = document.getElementById('silentInstallOption');
+        const silentInstallToggle = document.getElementById("{{ form.silentInstallOnDoubleClick.id_for_label }}");
+        const silentAgentModeOption = document.getElementById('silentAgentModeOption');
+        const silentAgentModeToggle = document.getElementById("{{ form.silentAgentMode.id_for_label }}");
+        const linuxGatedOptions = [
+            'hidecmOption',
+            'cycleMonitorOption',
+            'xOfflineOption',
+            'removeNewVersionNotifOption',
+            'hideSettingsMenuOption',
+            'forceDisableFileTransferOption',
+        ].map(id => document.getElementById(id));
+        const removeRecentSessionsOption = document.getElementById('removeRecentSessionsOption');
+        const copyIdPasswordButtonOption = document.getElementById('copyIdPasswordButtonOption');
+        const manualTemporaryPasswordOption = document.getElementById('manualTemporaryPasswordOption');
+        const startOnBootOption = document.getElementById('startOnBootOption');
+        const logoOption = document.getElementById('logoOption');
+        const privacyOption = document.getElementById('privacyOption');
+        const logoBase64Input = document.getElementById("{{ form.logobase64.id_for_label }}");
+        const privacyBase64Input = document.getElementById("{{ form.privacybase64.id_for_label }}");
+        const hideNetworkSettingOption = document.getElementById('hideNetworkSettingOption');
+        const incomingCompactWrapper = document.getElementById('incomingCompactWrapper');
+        const incomingCompactToggle = document.getElementById("{{ form.incomingCompactMode.id_for_label }}");
+        const incomingCompactDetails = document.getElementById('incomingCompactDetails');
+        const hideCmOption = document.getElementById('hidecmOption');
+        const hideCmToggle = document.getElementById("{{ form.hidecm.id_for_label }}");
+        const hideCmDefaultEnabledWrapper = document.getElementById('hidecmDefaultEnabledWrapper');
+        const hideCmDefaultEnabledToggle = document.getElementById("{{ form.hidecmDefaultEnabled.id_for_label }}");
+        const hideTrayOption = document.getElementById('hideTrayOption');
+        const hideTrayToggle = document.getElementById("{{ form.hideTray.id_for_label }}");
+        const defaultManualInput = document.getElementById("{{ form.defaultManual.id_for_label }}");
+        const overrideManualInput = document.getElementById("{{ form.overrideManual.id_for_label }}");
+        const relayServerInput = document.getElementById("{{ form.relayServer.id_for_label }}");
+        const smartMultiRelayInput = document.getElementById("{{ form.smartMultiRelay.id_for_label }}");
+        const relayServerOptions = document.getElementById('relayServerOptions');
+        const passwordRequirement = document.getElementById('passwordRequirement');
+        const permanentPasswordInput = document.getElementById("{{ form.permanentPassword.id_for_label }}");
+        const passApproveModeSelect = document.getElementById("{{ form.passApproveMode.id_for_label }}");
+        const forcedApproveModeInput = document.getElementById('hidecmForcedApproveMode');
+        let hideCmPreviousApproveMode = null;
+        platformSelect.tabIndex = -1;
+
+        const generatorForm = document.getElementById('myForm');
+        const sectionLinks = Array.from(document.querySelectorAll('[data-section-link]'));
+        const platformLabels = new Map([
+            ['windows', 'Windows 64 位'],
+            ['windows-x86', 'Windows 32 位'],
+            ['linux', 'Linux'],
+            ['android', 'Android'],
+            ['macos', 'macOS'],
+        ]);
+        const exenameInput = document.getElementById("{{ form.exename.id_for_label }}");
+        const deliveryAccessInputs = Array.from(document.querySelectorAll('input[name="download_access"]'));
+        const deliveryTtlSelect = document.getElementById("{{ form.download_ttl_hours.id_for_label }}");
+
+        function readManualSetting(input, targetKey) {
+            let manualValue = null;
+            const lines = input.value.split(/\r?\n/);
+            lines.forEach(line => {
+                const separator = line.indexOf('=');
+                const key = line.slice(0, separator).trim().replace(/_/g, '-');
+                if (separator >= 0 && key === targetKey) {
+                    manualValue = line.slice(separator + 1).trim();
+                }
+            });
+            return {input, lines, value: manualValue};
+        }
+
+        function removeManualSetting(setting, targetKey) {
+            setting.input.value = setting.lines.filter(line => {
+                const separator = line.indexOf('=');
+                const key = line.slice(0, separator).trim().replace(/_/g, '-');
+                return separator < 0 || key !== targetKey;
+            }).join('\n');
+        }
+
+        function migrateManualHideTraySetting() {
+            const settings = [
+                readManualSetting(defaultManualInput, 'hide-tray'),
+                readManualSetting(overrideManualInput, 'hide-tray'),
+            ];
+            const foundSettings = settings.filter(setting => setting.value !== null);
+            if (!foundSettings.length || foundSettings.some(setting => !['Y', 'N'].includes(setting.value))) {
+                return;
+            }
+            const linuxCustomAllowed = platformSelect.value !== 'linux' || (
+                beijingLinuxVersions.has(versionSelect.value) && beijingCustomToggle.checked
+            );
+            if (!desktopPlatforms.has(platformSelect.value) || !linuxCustomAllowed) {
+                return;
+            }
+            const overrideSetting = foundSettings.find(setting => setting.input === overrideManualInput);
+            const selectedSetting = overrideSetting || foundSettings[0];
+            hideTrayToggle.checked = selectedSetting.value === 'Y';
+            settings.forEach(setting => removeManualSetting(setting, 'hide-tray'));
+        }
+
+        function migrateManualRelaySetting() {
+            const settings = [
+                readManualSetting(defaultManualInput, 'relay-server'),
+                readManualSetting(overrideManualInput, 'relay-server'),
+            ];
+            const foundSettings = settings.filter(setting => setting.value !== null);
+            if (foundSettings.length) {
+                const overrideSetting = foundSettings.find(
+                    setting => setting.input === overrideManualInput
+                );
+                const selectedSetting = overrideSetting || foundSettings[0];
+                if (!relayServerInput.value.trim()) {
+                    relayServerInput.value = selectedSetting.value;
+                }
+                settings.forEach(setting => removeManualSetting(setting, 'relay-server'));
+            }
+            relayServerOptions.open = Boolean(relayServerInput.value.trim());
+        }
+
+        function migrateLegacyManualSettings() {
+            migrateManualHideTraySetting();
+            migrateManualRelaySetting();
+        }
+
+        generatorForm.addEventListener('submit', migrateLegacyManualSettings);
+
+        function syncSectionNavigation() {
+            sectionLinks.forEach(link => {
+                const section = document.querySelector(link.hash);
+                link.hidden = !section || section.hidden;
+            });
+            const currentLink = sectionLinks.find(link => link.getAttribute('aria-current') === 'location');
+            if (!currentLink || currentLink.hidden) {
+                sectionLinks.forEach(link => link.removeAttribute('aria-current'));
+                sectionLinks.find(link => !link.hidden)?.setAttribute('aria-current', 'location');
+            }
+        }
+
+        function updateBuildSummary() {
+            const parts = [platformLabels.get(platformSelect.value) || platformSelect.value];
+            if (versionSelect.value) {
+                parts.push(versionSelect.value === 'master' ? 'Master' : versionSelect.value);
+            }
+            if (exenameInput?.value.trim()) {
+                parts.push(exenameInput.value.trim());
+            }
+            if (smartMultiRelayInput?.checked) {
+                parts.push('智能多中继');
+            }
+            if (silentAgentModeToggle?.checked) {
+                parts.push('静默代理');
+            }
+            const access = deliveryAccessInputs.find(input => input.checked)?.value;
+            if (access) {
+                parts.push(access === 'public' ? '无需登录下载' : '登录后下载');
+            }
+            const ttl = deliveryTtlSelect?.value;
+            if (ttl) {
+                const ttlLabels = {'1': '1 小时', '24': '1 天', '72': '3 天', '168': '7 天'};
+                parts.push(`保存 ${ttlLabels[ttl] || `${ttl} 小时`}`);
+            }
+            document.getElementById('buildSummary').textContent = parts.join(' · ');
+        }
+
+        deliveryAccessInputs.forEach(input => input.addEventListener('change', updateBuildSummary));
+        deliveryTtlSelect?.addEventListener('change', updateBuildSummary);
+
+        function focusFirstFormError() {
+            const errorFields = Array.from(document.querySelectorAll('[data-error-field]'));
+            if (!errorFields.length || !generatorForm) {
+                return;
+            }
+            let firstField = null;
+            errorFields.forEach(error => {
+                const namedField = generatorForm.elements.namedItem(error.dataset.errorField);
+                const field = namedField && typeof namedField.focus === 'function'
+                    ? namedField
+                    : namedField?.[0];
+                if (field) {
+                    field.setAttribute('aria-invalid', 'true');
+                    firstField ||= field;
+                }
+            });
+            firstField?.closest('details')?.setAttribute('open', '');
+            if (firstField && !firstField.disabled && !firstField.closest('[hidden]')) {
+                firstField.closest('.builder-section')?.scrollIntoView({block: 'start'});
+                firstField.focus({preventScroll: true});
+            } else {
+                const errorSummary = document.querySelector('.errorlist');
+                errorSummary?.scrollIntoView({block: 'start'});
+                errorSummary?.focus({preventScroll: true});
+            }
+        }
+
+        if ('IntersectionObserver' in window) {
+            const sectionObserver = new IntersectionObserver(entries => {
+                const visible = entries
+                    .filter(entry => entry.isIntersecting && !entry.target.hidden)
+                    .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+                if (!visible) {
+                    return;
+                }
+                sectionLinks.forEach(link => {
+                    if (link.hash === `#${visible.target.id}`) {
+                        link.setAttribute('aria-current', 'location');
+                        const linkRail = link.parentElement;
+                        linkRail.scrollTo({
+                            left: link.offsetLeft - (linkRail.clientWidth - link.offsetWidth) / 2,
+                            behavior: 'smooth',
+                        });
+                    } else {
+                        link.removeAttribute('aria-current');
+                    }
+                });
+            }, {rootMargin: '-18% 0px -64% 0px', threshold: [0, 0.1, 0.4]});
+            document.querySelectorAll('.builder-section').forEach(section => sectionObserver.observe(section));
+        }
+        sectionLinks.forEach(link => {
+            link.addEventListener('click', event => {
+                const section = document.querySelector(link.hash);
+                if (!section || section.hidden) {
+                    return;
+                }
+                event.preventDefault();
+                section.scrollIntoView({behavior: 'smooth', block: 'start'});
+                history.replaceState(null, '', link.hash);
+            });
+        });
+
+        function selectedDirection() {
+            const checked = document.querySelector('input[name="direction"]:checked');
+            return checked ? checked.value : '';
+        }
+
+        function supportsVersion(minimum) {
+            if (versionSelect.value === 'master') {
+                return true;
+            }
+            const current = versionSelect.value.split('.').map(Number);
+            const required = minimum.split('.').map(Number);
+            for (let index = 0; index < Math.max(current.length, required.length); index++) {
+                const currentPart = current[index] || 0;
+                const requiredPart = required[index] || 0;
+                if (currentPart !== requiredPart) {
+                    return currentPart > requiredPart;
+                }
+            }
+            return true;
+        }
+
+        function setOptionAvailability(element, available) {
+            if (!element) {
+                return;
+            }
+            element.hidden = !available;
+            element.querySelectorAll('input, select, textarea').forEach(control => {
+                control.disabled = !available;
+            });
+        }
+
+        function setSectionAvailability(element, available) {
+            if (!element) {
+                return;
+            }
+            element.hidden = !available;
+            element.querySelectorAll('input, select, textarea, button').forEach(control => {
+                if (!available) {
+                    if (control.dataset.platformGatedDisabled === undefined) {
+                        control.dataset.platformGatedDisabled = String(control.disabled);
+                    }
+                    control.disabled = true;
+                } else if (control.dataset.platformGatedDisabled !== undefined) {
+                    control.disabled = control.dataset.platformGatedDisabled === 'true';
+                    delete control.dataset.platformGatedDisabled;
+                }
+            });
+        }
+
+        function syncPlatformIconState() {
+            document.querySelectorAll('.platform-icon').forEach(icon => {
+                const selected = icon.dataset.platform === platformSelect.value;
+                icon.classList.toggle('active', selected);
+                icon.setAttribute('aria-pressed', String(selected));
+            });
+        }
+
+        function updateHideCmDefaultVisibility(focusPassword = false) {
+            const capabilityAvailable = !hideCmOption.hidden && !hideCmToggle.disabled;
+            const defaultOptionAvailable = capabilityAvailable &&
+                (hideCmToggle.checked || hideCmDefaultEnabledToggle.checked);
+            setOptionAvailability(hideCmDefaultEnabledWrapper, defaultOptionAvailable);
+            const defaultEnabled = capabilityAvailable && hideCmToggle.checked &&
+                hideCmDefaultEnabledToggle.checked;
+            passwordRequirement.style.display = defaultEnabled ? 'block' : 'none';
+            if (defaultEnabled) {
+                if (hideCmPreviousApproveMode === null) {
+                    hideCmPreviousApproveMode = passApproveModeSelect.value;
+                }
+                passApproveModeSelect.value = 'password';
+                passApproveModeSelect.disabled = true;
+                forcedApproveModeInput.value = 'password';
+                forcedApproveModeInput.disabled = false;
+                if (focusPassword) {
+                    permanentPasswordInput.focus();
+                }
+            } else {
+                forcedApproveModeInput.disabled = true;
+                passApproveModeSelect.disabled = false;
+                if (hideCmPreviousApproveMode !== null) {
+                    passApproveModeSelect.value = hideCmPreviousApproveMode;
+                    hideCmPreviousApproveMode = null;
+                }
+            }
+        }
+
+        function syncSilentAgentDependencies(focusPassword = false) {
+            const enabled = !silentAgentModeOption.hidden &&
+                !silentAgentModeToggle.disabled && silentAgentModeToggle.checked;
+            if (!enabled) {
+                return;
+            }
+            silentInstallToggle.checked = true;
+            hideTrayToggle.checked = true;
+            hideCmToggle.checked = true;
+            hideCmDefaultEnabledToggle.checked = true;
+            updateHideCmDefaultVisibility(focusPassword);
+        }
+
+        function updateDesktopBehaviorVisibility() {
+            const isDesktop = desktopPlatforms.has(platformSelect.value);
+            const isWindowsBuild = windowsPlatforms.has(platformSelect.value);
+            const supportsFlutterDesktop = flutterDesktopPlatforms.has(platformSelect.value);
+            const supportsCompactLayout = compactLayoutPlatforms.has(platformSelect.value);
+            const isIncomingOnly = selectedDirection() === 'incoming';
+            const supportsBeijingCustom = platformSelect.value === 'linux' &&
+                beijingLinuxVersions.has(versionSelect.value);
+            const beijingCustomEnabled = supportsBeijingCustom && beijingCustomToggle.checked;
+            const supportsSmartMultiRelay = versionSelect.value === '1.4.9' &&
+                new Set(['windows', 'windows-x86', 'linux', 'android']).has(platformSelect.value);
+            setOptionAvailability(smartMultiRelayOption, supportsSmartMultiRelay);
+            if (!supportsSmartMultiRelay) {
+                smartMultiRelayInput.checked = false;
+            }
+            const smartMultiRelayEnabled = supportsSmartMultiRelay && smartMultiRelayInput.checked;
+            const linuxCustomAllowed = platformSelect.value !== 'linux' ||
+                beijingCustomEnabled || smartMultiRelayEnabled;
+            const supportsLogo = platformSelect.value !== 'windows-x86' && platformSelect.value !== 'android';
+            const supportsPrivacy = platformSelect.value === 'windows';
+            linuxCustomContent.forEach(element => {
+                setSectionAvailability(element, linuxCustomAllowed);
+            });
+            linuxCapabilityNotice.hidden = linuxCustomAllowed;
+            smartMultiRelayNotice.hidden = !smartMultiRelayEnabled;
+            setOptionAvailability(androidAppIdField, linuxCustomAllowed && platformSelect.value === 'android');
+            setOptionAvailability(logoOption, supportsLogo);
+            setOptionAvailability(privacyOption, supportsPrivacy);
+            if (smartMultiRelayEnabled) {
+                relayServerInput.value = '';
+                relayServerOptions.open = false;
+            }
+            setOptionAvailability(relayServerOptions, linuxCustomAllowed && !smartMultiRelayEnabled);
+            logoBase64Input.disabled = !supportsLogo;
+            privacyBase64Input.disabled = !supportsPrivacy;
+            beijingCustomOption.hidden = !supportsBeijingCustom;
+            beijingCustomToggle.disabled = !supportsBeijingCustom;
+            setOptionAvailability(delayFixOption, linuxCustomAllowed);
+            setSectionAvailability(desktopBehaviorSection, isDesktop && linuxCustomAllowed);
+            setOptionAvailability(silentInstallOption, isWindowsBuild);
+            const supportsSilentAgentMode = isWindowsBuild && versionSelect.value === '1.4.9';
+            setOptionAvailability(silentAgentModeOption, supportsSilentAgentMode);
+            if (!supportsSilentAgentMode) {
+                silentAgentModeToggle.checked = false;
+            }
+            linuxGatedOptions.forEach(option => {
+                if (option) {
+                    const flutterDesktopOnly = option.id === 'cycleMonitorOption';
+                    const flutterIncludingAndroid = option.id === 'xOfflineOption';
+                    const desktopOnly = option.id === 'hidecmOption' || option.id === 'hideSettingsMenuOption';
+                    const versionSupported =
+                        (option.id !== 'hideSettingsMenuOption' || supportsVersion('1.4.4')) &&
+                        (option.id !== 'forceDisableFileTransferOption' || supportsVersion('1.4.5'));
+                    const available = linuxCustomAllowed && versionSupported && !(
+                        (flutterDesktopOnly && !supportsFlutterDesktop) ||
+                        (flutterIncludingAndroid && !(supportsFlutterDesktop || platformSelect.value === 'android')) ||
+                        (desktopOnly && !isDesktop)
+                    );
+                    setOptionAvailability(option, available);
+                }
+            });
+            syncSilentAgentDependencies();
+            updateHideCmDefaultVisibility();
+            setOptionAvailability(
+                hideNetworkSettingOption,
+                isDesktop && linuxCustomAllowed && supportsVersion('1.4.4')
+            );
+            setOptionAvailability(copyIdPasswordButtonOption, supportsFlutterDesktop && linuxCustomAllowed);
+            setOptionAvailability(manualTemporaryPasswordOption, supportsFlutterDesktop && linuxCustomAllowed);
+            setOptionAvailability(removeRecentSessionsOption, isDesktop && linuxCustomAllowed);
+            setOptionAvailability(hideTrayOption, isDesktop && linuxCustomAllowed);
+            setOptionAvailability(startOnBootOption, platformSelect.value === 'windows');
+            const compactLayoutAvailable = supportsCompactLayout && isIncomingOnly &&
+                linuxCustomAllowed && supportsVersion('1.4.2');
+            setOptionAvailability(incomingCompactWrapper, compactLayoutAvailable);
+            incomingCompactDetails.hidden = !(compactLayoutAvailable && incomingCompactToggle.checked);
+            if (!linuxCustomAllowed) {
+                linuxCustomContent.forEach(element => setSectionAvailability(element, false));
+            }
+            syncSectionNavigation();
+            updateBuildSummary();
+        }
+
+        document.querySelectorAll('.platform-icon').forEach(icon => {
+            icon.addEventListener('click', function() {
+                platformSelect.value = this.dataset.platform;
+                syncPlatformIconState();
+                updateDesktopBehaviorVisibility();
+            });
+        });
+        platformSelect.addEventListener('change', function() {
+            syncPlatformIconState();
+            updateDesktopBehaviorVisibility();
+        });
+        versionSelect.addEventListener('change', updateDesktopBehaviorVisibility);
+        exenameInput?.addEventListener('input', updateBuildSummary);
+        document.querySelectorAll('input[name="direction"]').forEach(input => {
+            input.addEventListener('change', updateDesktopBehaviorVisibility);
+        });
+        beijingCustomToggle.addEventListener('change', updateDesktopBehaviorVisibility);
+        smartMultiRelayInput.addEventListener('change', updateDesktopBehaviorVisibility);
+        incomingCompactToggle.addEventListener('change', updateDesktopBehaviorVisibility);
+        hideCmToggle.addEventListener('change', function() {
+            if (!this.checked) {
+                hideCmDefaultEnabledToggle.checked = false;
+            }
+            syncSilentAgentDependencies();
+            updateHideCmDefaultVisibility();
+        });
+        hideCmDefaultEnabledToggle.addEventListener('change', function() {
+            syncSilentAgentDependencies(this.checked);
+            updateHideCmDefaultVisibility(this.checked);
+        });
+        silentAgentModeToggle.addEventListener('change', function() {
+            syncSilentAgentDependencies(this.checked);
+            updateHideCmDefaultVisibility(this.checked);
+            updateBuildSummary();
+        });
+        hideTrayToggle.addEventListener('change', function() {
+            syncSilentAgentDependencies();
+        });
+        silentInstallToggle.addEventListener('change', function() {
+            syncSilentAgentDependencies();
+        });
+        migrateLegacyManualSettings();
+        syncPlatformIconState();
+        updateBuildSummary();
+        updateDesktopBehaviorVisibility();
+        focusFirstFormError();
+        document.getElementById("{{ form.iconfile.id_for_label }}").addEventListener('change', function(event) {
+            previewImage(event.target, 'icon-preview');
+        });
+        document.getElementById("{{ form.logofile.id_for_label }}").addEventListener('change', function(event) {
+            previewImage(event.target, 'logo-preview');
+        });
+        document.getElementById("{{ form.privacyfile.id_for_label }}").addEventListener('change', function(event) {
+            previewImage(event.target, 'privacy-preview');
+        });
+
+        const enableKeyboard = document.getElementById("{{ form.enableKeyboard.id_for_label }}");
+        const enableClipboard = document.getElementById("{{ form.enableClipboard.id_for_label }}");
+        const enableFileCopyPaste = document.getElementById("{{ form.enableFileCopyPaste.id_for_label }}");
+        const enableFileTransfer = document.getElementById("{{ form.enableFileTransfer.id_for_label }}");
+        const enableAudio = document.getElementById("{{ form.enableAudio.id_for_label }}");
+        const enableTCP = document.getElementById("{{ form.enableTCP.id_for_label }}");
+        const enableRemoteRestart = document.getElementById("{{ form.enableRemoteRestart.id_for_label }}");
+        const enableRecording = document.getElementById("{{ form.enableRecording.id_for_label }}");
+        const enableBlockingInput = document.getElementById("{{ form.enableBlockingInput.id_for_label }}");
+        const enableRemoteModi = document.getElementById("{{ form.enableRemoteModi.id_for_label }}");
+        const enablePrinter = document.getElementById("{{ form.enablePrinter.id_for_label }}");
+        const enableCamera = document.getElementById("{{ form.enableCamera.id_for_label }}");
+        const enableTerminal = document.getElementById("{{ form.enableTerminal.id_for_label }}");
+
+        document.getElementById("{{ form.permissionsType.id_for_label }}").addEventListener('change', function() {
+            if (this.value === 'full') {
+                enableKeyboard.checked = true;
+                enableClipboard.checked = true;
+                enableFileCopyPaste.checked = true;
+                enableFileTransfer.checked = true;
+                enableAudio.checked = true;
+                enableTCP.checked = true;
+                enableRemoteRestart.checked = true;
+                enableRecording.checked = true;
+                enableBlockingInput.checked = true;
+                enableRemoteModi.checked = true;
+                enablePrinter.checked = true;
+                enableCamera.checked = true;
+                enableTerminal.checked = true;
+
+                enableKeyboard.disabled = true;
+                enableClipboard.disabled = true;
+                enableFileCopyPaste.disabled = true;
+                enableFileTransfer.disabled = true;
+                enableAudio.disabled = true;
+                enableTCP.disabled = true;
+                enableRemoteRestart.disabled = true;
+                enableRecording.disabled = true;
+                enableBlockingInput.disabled = true;
+                enableRemoteModi.disabled = true;
+                enablePrinter.disabled = true;
+                enableCamera.disabled = true;
+                enableTerminal.disabled = true;
+            } else if (this.value === 'view') {
+                enableKeyboard.checked = false;
+                enableClipboard.checked = false;
+                enableFileCopyPaste.checked = false;
+                enableFileTransfer.checked = false;
+                enableAudio.checked = false;
+                enableTCP.checked = false;
+                enableRemoteRestart.checked = false;
+                enableRecording.checked = false;
+                enableBlockingInput.checked = false;
+                enableRemoteModi.checked = false;
+                enablePrinter.checked = false;
+                enableCamera.checked = false;
+                enableTerminal.checked = false;
+
+                enableKeyboard.disabled = true;
+                enableClipboard.disabled = true;
+                enableFileCopyPaste.disabled = true;
+                enableFileTransfer.disabled = true;
+                enableAudio.disabled = true;
+                enableTCP.disabled = true;
+                enableRemoteRestart.disabled = true;
+                enableRecording.disabled = true;
+                enableBlockingInput.disabled = true;
+                enableRemoteModi.disabled = true;
+                enablePrinter.disabled = true;
+                enableCamera.disabled = true;
+                enableTerminal.disabled = true;
+            } else if (this.value === 'custom') {
+                enableKeyboard.disabled = false;
+                enableClipboard.disabled = false;
+                enableFileCopyPaste.disabled = false;
+                enableFileTransfer.disabled = false;
+                enableAudio.disabled = false;
+                enableTCP.disabled = false;
+                enableRemoteRestart.disabled = false;
+                enableRecording.disabled = false;
+                enableBlockingInput.disabled = false;
+                enableRemoteModi.disabled = false;
+                enablePrinter.checked = false;
+                enableCamera.checked = false;
+                enableTerminal.checked = false;
+                enablePrinter.disabled = false;
+                enableCamera.disabled = false;
+                enableTerminal.disabled = false;
+            }
+        });
+        function previewImage(input, previewContainerId) {
+            if (input.files && input.files[0]) {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    var img = document.createElement('img');
+                    img.src = e.target.result;
+                    document.getElementById(previewContainerId).innerHTML = '';
+                    document.getElementById(previewContainerId).appendChild(img);
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+        async function saveFormData() {
+            const filename = exenameInput.value;
+            if (!filename) {
+                document.getElementById("filenameError").textContent = "请输入配置名称。";
+                exenameInput.setAttribute('aria-invalid', 'true');
+                exenameInput.scrollIntoView({behavior: 'smooth', block: 'center'});
+                exenameInput.focus({preventScroll: true});
+                return;
+            } else {
+                document.getElementById("filenameError").textContent = "";
+                exenameInput.removeAttribute('aria-invalid');
+            }
+
+            migrateLegacyManualSettings();
+
+            const formData = {};
+            const form = document.getElementById("myForm"); // Get the form element
+
+            // 1. Use FormData for robust data collection (handles most input types):
+            const formDataObj = new FormData(form);  // Create a FormData object
+
+            formDataObj.forEach((value, key) => {
+                if (value instanceof File) {
+                    return;
+                }
+                formData[key] = value; // Add each key/value pair to the formData object.
+            });
+
+            // 2. Handle select elements separately (more reliable):
+            const selectElements = form.querySelectorAll('select');
+            selectElements.forEach(select => {
+                if (select.name && !select.disabled) {
+                    formData[select.name] = select.value;
+                }
+            });
+
+            // 3. Handle checkboxes and radio buttons (important!):
+            const checkboxRadioElements = form.querySelectorAll('input[type="checkbox"], input[type="radio"]');
+            checkboxRadioElements.forEach(input => {
+                if (input.name && !input.disabled) { //only save controls submitted by the form
+                    if (input.checked) {
+                        formData[input.name] = input.value;
+                    } else if (!formData.hasOwnProperty(input.name) && input.type === 'checkbox') { //if it's a checkbox and it's not checked, add it as false
+                        formData[input.name] = false;
+                    }
+                }
+            });
+
+            // 4. Handle icon and logo
+            const iconPreview = document.getElementById('icon-preview');
+            if (iconPreview.firstChild && iconPreview.firstChild.src.startsWith('data:image/png;base64')) {
+                formData.iconfile = iconPreview.firstChild.src;  // Use existing base64
+            } else { //if it's a file upload
+                const iconFile = document.getElementById("{{ form.iconfile.id_for_label }}").files[0];
+                if (iconFile) {
+                    formData.iconfile = await readFileAsBase64(iconFile);
+                }
+            }
+
+            const logoPreview = document.getElementById('logo-preview');
+            if (logoPreview.firstChild && logoPreview.firstChild.src.startsWith('data:image/png;base64')) {
+                formData.logofile = logoPreview.firstChild.src; // Use existing base64
+            } else { //if it's a file upload
+                const logoFile = document.getElementById("{{ form.logofile.id_for_label }}").files[0];
+                if (logoFile) {
+                    formData.logofile = await readFileAsBase64(logoFile);
+                }
+            }
+
+            const privacyPreview = document.getElementById('privacy-preview');
+            if (privacyPreview.firstChild && privacyPreview.firstChild.src.startsWith('data:image/png;base64')) {
+                formData.privacyfile = privacyPreview.firstChild.src; // Use existing base64
+            } else { //if it's a file upload
+                const privacyFile = document.getElementById("{{ form.privacyfile.id_for_label }}").files[0];
+                if (privacyFile) {
+                    formData.privacyfile = await readFileAsBase64(privacyFile);
+                }
+            }
+
+            const jsonData = JSON.stringify(formData, null, 2);
+            const blob = new Blob([jsonData], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename + ".json";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        async function readFileAsBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (event) => resolve(event.target.result);
+                reader.onerror = (error) => reject(error);
+                reader.readAsDataURL(file);
+            });
+        }
+
+
+        function loadFormData() {
+            const fileInput = document.getElementById("fileInput");
+            fileInput.click();
+
+            fileInput.onchange = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const formData = JSON.parse(e.target.result);
+                            const form = document.getElementById('myForm');
+                            passApproveModeSelect.disabled = false;
+                            forcedApproveModeInput.disabled = true;
+                            hideCmPreviousApproveMode = null;
+                            form.reset();
+                            if (!Object.prototype.hasOwnProperty.call(formData, 'smartMultiRelay')) {
+                                smartMultiRelayInput.checked = false;
+                            }
+                            if (!Object.prototype.hasOwnProperty.call(formData, 'relayServer')) {
+                                relayServerInput.value = '';
+                            }
+                            if (!Object.prototype.hasOwnProperty.call(formData, 'defaultManual')) {
+                                defaultManualInput.value = '';
+                            }
+                            if (!Object.prototype.hasOwnProperty.call(formData, 'overrideManual')) {
+                                overrideManualInput.value = '';
+                            }
+                            ['id_iconbase64', 'id_logobase64', 'id_privacybase64'].forEach(id => {
+                                document.getElementById(id).value = '';
+                            });
+                            ['icon-preview', 'logo-preview', 'privacy-preview'].forEach(id => {
+                                document.getElementById(id).innerHTML = '';
+                            });
+
+                            const checkedValue = value =>
+                                value === true || value === 'true' || value === 'on';
+                            const hasDefaultHideSetting = Object.prototype.hasOwnProperty.call(
+                                formData, 'hidecmDefaultEnabled');
+                            if (!hasDefaultHideSetting) {
+                                // Before this field existed, hidecm=true meant default-on.
+                                formData.hidecmDefaultEnabled = checkedValue(formData.hidecm);
+                                if (formData.hidecmDefaultEnabled) {
+                                    formData.settings = 'settingsY';
+                                }
+                            }
+                            if (!checkedValue(formData.hidecm)) {
+                                formData.hidecmDefaultEnabled = false;
+                            }
+                            for (const key in formData) {
+                                // More robust selector: checks for name OR id
+                                const elements = document.querySelectorAll(`[name="${key}"], [id="${key}"]`);
+
+                                if (elements.length > 0) { // Check if any element(s) exist
+                                    elements.forEach(element => { // Loop through all matching elements (important for radios)
+                                        if (element.type === 'radio') {
+                                            if (element.value === String(formData[key])) { // Compare value, crucial for radios
+                                                element.checked = true;
+                                            } else {
+                                                element.checked = false; // Uncheck others in the group
+                                            }
+                                        } else if (element.type === 'checkbox') {
+                                            element.checked = checkedValue(formData[key]);
+                                        } else if (element.type !== 'file') {
+                                            element.value = formData[key];
+                                        }
+
+                                        // Render imported images without injecting JSON values into HTML.
+                                        if (key === 'iconfile' && isPngDataUrl(formData[key])) {
+                                            renderImportedPngPreview(formData[key], 'id_iconbase64', 'icon-preview');
+                                        }
+                                        if (key === 'logofile' && isPngDataUrl(formData[key])) {
+                                            renderImportedPngPreview(formData[key], 'id_logobase64', 'logo-preview');
+                                        }
+                                        if (key === 'privacyfile' && isPngDataUrl(formData[key])) {
+                                            renderImportedPngPreview(formData[key], 'id_privacybase64', 'privacy-preview');
+                                        }
+                                    });
+                                }
+                            }
+                            migrateLegacyManualSettings();
+                            syncPlatformIconState();
+                            updateDesktopBehaviorVisibility();
+                            updateBuildSummary();
+                        } catch (error) {
+                            alert("配置导入失败：JSON 文件无效。");
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            };
+        }
+
+        function renderImportedPngPreview(dataUrl, base64InputId, previewContainerId) {
+            const image = document.createElement('img');
+            image.alt = '';
+            image.src = dataUrl;
+            document.getElementById(base64InputId).value = dataUrl;
+            document.getElementById(previewContainerId).replaceChildren(image);
+        }
+
+        function isPngDataUrl(value) {
+            return typeof value === 'string' &&
+                /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+{% extends "base_account.html" %}
+
+{% block title %}注册 | RustDesk 生成器{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block header %}{% endblock %}
+
+{% block content %}
+<div class="auth-layout">
+    <section class="auth-showcase" aria-label="RustDesk 生成器介绍">
+        <a class="app-brand" href="/" aria-label="RustDesk 生成器">
+            <span class="brand-mark" aria-hidden="true">RD</span>
+            <span class="brand-copy"><span>RustDesk</span><small>生成器控制台</small></span>
+        </a>
+        <div class="auth-showcase__copy">
+            <span class="eyebrow">MEMBER WORKSPACE</span>
+            <h1>先创建账号，再激活你的会员。</h1>
+            <p>注册不会自动开通生成权限。登录后填写购买获得的激活码，即可按卡种使用客户端生成服务。</p>
+        </div>
+        <p class="auth-showcase__footer">Secure workspace · One-time activation code</p>
+    </section>
+    <section class="auth-form-side">
+        <div class="panel form-panel registration-panel">
+            <h1>创建账号</h1>
+            <p class="form-panel__subtitle">验证邮箱后创建账号，注册成功后再使用激活码开通会员。</p>
+            <form method="post" action="{% url 'users:register' %}">
+                {% csrf_token %}
+                {{ form.non_field_errors }}
+                {% for field in form %}
+                    <div class="field">
+                        {{ field.label_tag }}
+                        {% if field.name == "email" %}
+                            <div class="email-verification-row">
+                                {{ field }}
+                                <button
+                                    id="sendEmailCode"
+                                    class="button button--secondary email-code-button"
+                                    type="button"
+                                    data-url="{% url 'users:registration_email_code' %}"
+                                >获取验证码</button>
+                            </div>
+                            <span id="emailCodeStatus" class="verification-feedback" aria-live="polite"></span>
+                        {% else %}
+                            {{ field }}
+                        {% endif %}
+                        {{ field.errors }}
+                        {% if field.help_text %}<span class="helptext">{{ field.help_text|safe }}</span>{% endif %}
+                    </div>
+                {% endfor %}
+                <button class="button button--block" type="submit"><i class="fa-solid fa-user-plus" aria-hidden="true"></i> 验证邮箱并注册</button>
+            </form>
+            <p class="auth-switch">已有账号？<a href="{% url 'users:login' %}">返回登录</a></p>
+        </div>
+    </section>
+</div>
+<script>
+    (() => {
+        const button = document.getElementById('sendEmailCode');
+        const emailInput = document.getElementById('id_email');
+        const status = document.getElementById('emailCodeStatus');
+        const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        if (!button || !emailInput || !status || !csrfToken) return;
+
+        let countdownTimer = null;
+
+        const showStatus = (message, kind = '') => {
+            status.textContent = message;
+            status.className = `verification-feedback${kind ? ` verification-feedback--${kind}` : ''}`;
+        };
+
+        const startCountdown = (seconds) => {
+            if (countdownTimer) window.clearInterval(countdownTimer);
+            let remaining = Math.max(Number(seconds) || 60, 1);
+            button.disabled = true;
+            button.textContent = `${remaining} 秒后重发`;
+            countdownTimer = window.setInterval(() => {
+                remaining -= 1;
+                if (remaining <= 0) {
+                    window.clearInterval(countdownTimer);
+                    countdownTimer = null;
+                    button.disabled = false;
+                    button.textContent = '重新发送';
+                    return;
+                }
+                button.textContent = `${remaining} 秒后重发`;
+            }, 1000);
+        };
+
+        button.addEventListener('click', async () => {
+            if (!emailInput.value.trim() || !emailInput.checkValidity()) {
+                emailInput.reportValidity();
+                return;
+            }
+
+            button.disabled = true;
+            button.textContent = '发送中…';
+            showStatus('正在发送验证码…');
+            const body = new FormData();
+            body.append('email', emailInput.value.trim());
+            body.append('csrfmiddlewaretoken', csrfToken.value);
+
+            try {
+                const response = await fetch(button.dataset.url, {
+                    method: 'POST',
+                    body,
+                    credentials: 'same-origin',
+                    headers: {'X-Requested-With': 'XMLHttpRequest'},
+                });
+                const payload = await response.json();
+                if (!response.ok || !payload.ok) {
+                    showStatus(payload.message || '验证码发送失败，请稍后重试。', 'error');
+                    if (payload.retry_after) {
+                        startCountdown(payload.retry_after);
+                    } else {
+                        button.disabled = false;
+                        button.textContent = '获取验证码';
+                    }
+                    return;
+                }
+                showStatus(payload.message, 'success');
+                startCountdown(payload.retry_after);
+            } catch (error) {
+                showStatus('网络异常，请稍后重试。', 'error');
+                button.disabled = false;
+                button.textContent = '获取验证码';
+            }
+        });
+    })();
+</script>
+{% endblock %}

@@ -1,0 +1,1281 @@
+diff --git a/libs/enigo/src/linux/nix_impl.rs b/libs/enigo/src/linux/nix_impl.rs
+index 902d779..6fd7db1 100644
+--- a/libs/enigo/src/linux/nix_impl.rs
++++ b/libs/enigo/src/linux/nix_impl.rs
+@@ -115,7 +115,8 @@ impl Enigo {
+ 
+ impl Default for Enigo {
+     fn default() -> Self {
+-        let is_x11 = hbb_common::platform::linux::is_x11_or_headless();
++        let prefer_custom = prefer_custom_input();
++        let is_x11 = hbb_common::platform::linux::is_x11_or_headless() && !prefer_custom;
+         Self {
+             is_x11,
+             tfc: if is_x11 {
+@@ -131,11 +132,21 @@ impl Default for Enigo {
+             },
+             custom_keyboard: None,
+             custom_mouse: None,
+-            xdo: EnigoXdo::default(),
++            xdo: if prefer_custom {
++                EnigoXdo::disabled()
++            } else {
++                EnigoXdo::default()
++            },
+         }
+     }
+ }
+ 
++fn prefer_custom_input() -> bool {
++    std::env::var("RUSTDESK_UINPUT_INPUT_FALLBACK")
++        .map(|value| !value.is_empty() && value != "0")
++        .unwrap_or(false)
++}
++
+ impl MouseControllable for Enigo {
+     fn as_any(&self) -> &dyn std::any::Any {
+         self
+diff --git a/libs/enigo/src/linux/xdo.rs b/libs/enigo/src/linux/xdo.rs
+index f0f7d49..62c7c74 100644
+--- a/libs/enigo/src/linux/xdo.rs
++++ b/libs/enigo/src/linux/xdo.rs
+@@ -79,6 +79,13 @@ impl Default for EnigoXdo {
+     }
+ }
+ impl EnigoXdo {
++    pub(super) fn disabled() -> Self {
++        Self {
++            xdo: ptr::null(),
++            delay: DEFAULT_DELAY,
++        }
++    }
++
+     /// Get the delay per keypress.
+     /// Default value is 12000.
+     /// This is Linux-specific.
+diff --git a/libs/scrap/src/x11/capturer.rs b/libs/scrap/src/x11/capturer.rs
+index 550bfb3..2a8a55c 100644
+--- a/libs/scrap/src/x11/capturer.rs
++++ b/libs/scrap/src/x11/capturer.rs
+@@ -1,13 +1,22 @@
+ use super::ffi::*;
+ use super::Display;
+-use hbb_common::libc;
++use hbb_common::{libc, log};
+ use std::{io, ptr, slice};
+ 
++enum Backend {
++    Shm {
++        shmid: i32,
++        xcbid: u32,
++        buffer: *const u8,
++    },
++    Plain {
++        buffer: Vec<u8>,
++    },
++}
++
+ pub struct Capturer {
+     display: Display,
+-    shmid: i32,
+-    xcbid: u32,
+-    buffer: *const u8,
++    backend: Backend,
+ 
+     size: usize,
+     saved_raw_data: Vec<u8>, // for faster compare and copy
+@@ -21,6 +30,29 @@ impl Capturer {
+         let rect = display.rect();
+         let size = (rect.w as usize) * (rect.h as usize) * pixel_width;
+ 
++        let backend = match Self::new_shm_backend(&display, size) {
++            Ok(backend) => backend,
++            Err(err) => {
++                log::warn!(
++                    "X11 MIT-SHM capturer unavailable: {}; falling back to xcb_get_image",
++                    err
++                );
++                Backend::Plain {
++                    buffer: vec![0; size],
++                }
++            }
++        };
++
++        let c = Capturer {
++            display,
++            backend,
++            size,
++            saved_raw_data: Vec::new(),
++        };
++        Ok(c)
++    }
++
++    fn new_shm_backend(display: &Display, size: usize) -> io::Result<Backend> {
+         // Create a shared memory segment.
+ 
+         let shmid = unsafe {
+@@ -41,7 +73,11 @@ impl Capturer {
+         let buffer = unsafe { libc::shmat(shmid, ptr::null(), libc::SHM_RDONLY) } as *mut u8;
+ 
+         if buffer as isize == -1 {
+-            return Err(io::Error::last_os_error());
++            let err = io::Error::last_os_error();
++            unsafe {
++                libc::shmctl(shmid, libc::IPC_RMID, ptr::null_mut());
++            }
++            return Err(err);
+         }
+ 
+         // Attach the segment to XCB.
+@@ -57,45 +93,114 @@ impl Capturer {
+             );
+         }
+ 
+-        let c = Capturer {
+-            display,
++        Ok(Backend::Shm {
+             shmid,
+             xcbid,
+             buffer,
+-            size,
+-            saved_raw_data: Vec::new(),
+-        };
+-        Ok(c)
++        })
+     }
+ 
+     pub fn display(&self) -> &Display {
+         &self.display
+     }
+ 
+-    fn get_image(&self) {
+-        let rect = self.display.rect();
++    fn get_image_shm(display: &Display, xcbid: u32) {
++        let rect = display.rect();
+         unsafe {
+             let request = xcb_shm_get_image_unchecked(
+-                self.display.server().raw(),
+-                self.display.root(),
++                display.server().raw(),
++                display.root(),
+                 rect.x,
+                 rect.y,
+                 rect.w,
+                 rect.h,
+                 !0,
+                 XCB_IMAGE_FORMAT_Z_PIXMAP,
+-                self.xcbid,
++                xcbid,
+                 0,
+             );
+             let response =
+-                xcb_shm_get_image_reply(self.display.server().raw(), request, ptr::null_mut());
++                xcb_shm_get_image_reply(display.server().raw(), request, ptr::null_mut());
++            libc::free(response as *mut _);
++        }
++    }
++
++    fn get_image_plain(
++        display: &Display,
++        out: &mut Vec<u8>,
++        expected_size: usize,
++    ) -> io::Result<()> {
++        let rect = display.rect();
++        unsafe {
++            let request = xcb_get_image(
++                display.server().raw(),
++                XCB_IMAGE_FORMAT_Z_PIXMAP,
++                display.root(),
++                rect.x,
++                rect.y,
++                rect.w,
++                rect.h,
++                !0,
++            );
++
++            let mut error: *mut xcb_generic_error_t = ptr::null_mut();
++            let response = xcb_get_image_reply(display.server().raw(), request, &mut error as _);
++
++            if !error.is_null() {
++                let error_code = (*error).error_code;
++                libc::free(error as *mut _);
++                if !response.is_null() {
++                    libc::free(response as *mut _);
++                }
++                return Err(io::Error::new(
++                    io::ErrorKind::Other,
++                    format!("xcb_get_image failed with X11 error {}", error_code),
++                ));
++            }
++
++            if response.is_null() {
++                return Err(io::Error::new(
++                    io::ErrorKind::Other,
++                    "xcb_get_image returned a null response",
++                ));
++            }
++
++            let data = xcb_get_image_data(response);
++            let len = xcb_get_image_data_length(response);
++            if len < 0 {
++                libc::free(response as *mut _);
++                return Err(io::Error::new(
++                    io::ErrorKind::InvalidData,
++                    format!("xcb_get_image returned a negative data length: {}", len),
++                ));
++            }
++            let len = len as usize;
++            if data.is_null() || len < expected_size {
++                libc::free(response as *mut _);
++                return Err(io::Error::new(
++                    io::ErrorKind::UnexpectedEof,
++                    format!("xcb_get_image data too small: {} < {}", len, expected_size),
++                ));
++            }
++
++            out.resize(expected_size, 0);
++            ptr::copy_nonoverlapping(data, out.as_mut_ptr(), expected_size);
+             libc::free(response as *mut _);
+         }
++        Ok(())
+     }
+ 
+     pub fn frame<'b>(&'b mut self) -> std::io::Result<&'b [u8]> {
+-        self.get_image();
+-        let result = unsafe { slice::from_raw_parts(self.buffer, self.size) };
++        let result = match &mut self.backend {
++            Backend::Shm { xcbid, buffer, .. } => {
++                Self::get_image_shm(&self.display, *xcbid);
++                unsafe { slice::from_raw_parts(*buffer, self.size) }
++            }
++            Backend::Plain { buffer } => {
++                Self::get_image_plain(&self.display, buffer, self.size)?;
++                buffer.as_slice()
++            }
++        };
+         crate::would_block_if_equal(&mut self.saved_raw_data, result)?;
+         Ok(result)
+     }
+@@ -103,13 +208,20 @@ impl Capturer {
+ 
+ impl Drop for Capturer {
+     fn drop(&mut self) {
+-        unsafe {
+-            // Detach segment from XCB.
+-            xcb_shm_detach(self.display.server().raw(), self.xcbid);
+-            // Detach segment from our space.
+-            libc::shmdt(self.buffer as *mut _);
+-            // Destroy the shared memory segment.
+-            libc::shmctl(self.shmid, libc::IPC_RMID, ptr::null_mut());
++        if let Backend::Shm {
++            shmid,
++            xcbid,
++            buffer,
++        } = &self.backend
++        {
++            unsafe {
++                // Detach segment from XCB.
++                xcb_shm_detach(self.display.server().raw(), *xcbid);
++                // Detach segment from our space.
++                libc::shmdt(*buffer as *mut _);
++                // Destroy the shared memory segment.
++                libc::shmctl(*shmid, libc::IPC_RMID, ptr::null_mut());
++            }
+         }
+     }
+ }
+diff --git a/libs/scrap/src/x11/ffi.rs b/libs/scrap/src/x11/ffi.rs
+index 370ce78..2eb1cbd 100644
+--- a/libs/scrap/src/x11/ffi.rs
++++ b/libs/scrap/src/x11/ffi.rs
+@@ -48,6 +48,27 @@ extern "C" {
+         e: *mut *mut xcb_generic_error_t,
+     ) -> *mut xcb_shm_get_image_reply_t;
+ 
++    pub fn xcb_get_image(
++        c: *mut xcb_connection_t,
++        format: u8,
++        drawable: xcb_drawable_t,
++        x: i16,
++        y: i16,
++        width: u16,
++        height: u16,
++        plane_mask: u32,
++    ) -> xcb_get_image_cookie_t;
++
++    pub fn xcb_get_image_reply(
++        c: *mut xcb_connection_t,
++        cookie: xcb_get_image_cookie_t,
++        e: *mut *mut xcb_generic_error_t,
++    ) -> *mut xcb_get_image_reply_t;
++
++    pub fn xcb_get_image_data(r: *const xcb_get_image_reply_t) -> *mut u8;
++
++    pub fn xcb_get_image_data_length(r: *const xcb_get_image_reply_t) -> i32;
++
+     pub fn xcb_randr_get_monitors_unchecked(
+         c: *mut xcb_connection_t,
+         window: xcb_window_t,
+@@ -201,6 +222,12 @@ pub struct xcb_shm_get_image_cookie_t {
+     pub sequence: u32,
+ }
+ 
++#[repr(C)]
++#[derive(Clone, Copy)]
++pub struct xcb_get_image_cookie_t {
++    pub sequence: u32,
++}
++
+ #[repr(C)]
+ #[derive(Clone, Copy)]
+ pub struct xcb_void_cookie_t {
+@@ -236,6 +263,16 @@ pub struct xcb_shm_get_image_reply_t {
+     pub size: u32,
+ }
+ 
++#[repr(C)]
++pub struct xcb_get_image_reply_t {
++    pub response_type: u8,
++    pub depth: u8,
++    pub sequence: u16,
++    pub length: u32,
++    pub visual: xcb_visualid_t,
++    pub pad0: [u8; 20],
++}
++
+ #[repr(C)]
+ pub struct xcb_randr_get_monitors_reply_t {
+     pub response_type: u8,
+diff --git a/res/rustdesk.service b/res/rustdesk.service
+index 1b3feb1..13999f3 100644
+--- a/res/rustdesk.service
++++ b/res/rustdesk.service
+@@ -16,7 +16,7 @@ KillMode=mixed
+ TimeoutStopSec=30
+ User=root
+ LimitNOFILE=100000
+-Environment="PULSE_LATENCY_MSEC=60" "PIPEWIRE_LATENCY=1024/48000"
++Environment="PULSE_LATENCY_MSEC=60" "PIPEWIRE_LATENCY=1024/48000" "RUSTDESK_UINPUT_INPUT_FALLBACK=1" "RUSTDESK_XCB_MOUSE_FALLBACK=1" "RUSTDESK_FORCE_CM_NO_UI=1" "RUSTDESK_DISABLE_TRAY=1" "RUSTDESK_PREWARM_CM_NO_UI=1"
+ 
+ [Install]
+ WantedBy=multi-user.target
+diff --git a/src/core_main.rs b/src/core_main.rs
+index 0d8a91b..f708fff 100644
+--- a/src/core_main.rs
++++ b/src/core_main.rs
+@@ -337,12 +337,21 @@ pub fn core_main() -> Option<Vec<String>> {
+             #[cfg(target_os = "linux")]
+             {
+                 hbb_common::allow_err!(crate::platform::check_autostart_config());
+-                std::process::Command::new("pkill")
+-                    .arg("-f")
+-                    .arg(&format!("{} --tray", crate::get_app_name().to_lowercase()))
+-                    .status()
+-                    .ok();
+-                hbb_common::allow_err!(crate::run_me(vec!["--tray"]));
++                if std::env::var("RUSTDESK_DISABLE_TRAY").unwrap_or_default() != "1" {
++                    std::process::Command::new("pkill")
++                        .arg("-f")
++                        .arg(&format!("{} --tray", crate::get_app_name().to_lowercase()))
++                        .status()
++                        .ok();
++                    hbb_common::allow_err!(crate::run_me(vec!["--tray"]));
++                } else {
++                    log::info!("skip tray autostart by RUSTDESK_DISABLE_TRAY");
++                }
++                if std::env::var("RUSTDESK_FORCE_CM_NO_UI").unwrap_or_default() == "1"
++                    && std::env::var("RUSTDESK_PREWARM_CM_NO_UI").unwrap_or_default() == "1"
++                {
++                    prewarm_cm_no_ui();
++                }
+             }
+             #[cfg(windows)]
+             crate::privacy_mode::restore_reg_connectivity(true, false);
+@@ -612,6 +621,30 @@ pub fn core_main() -> Option<Vec<String>> {
+     return Some(args);
+ }
+ 
++#[cfg(target_os = "linux")]
++fn prewarm_cm_no_ui() {
++    let current_exe = std::env::current_exe()
++        .unwrap_or_default()
++        .to_string_lossy()
++        .to_string();
++    let expected = format!("{} --cm-no-ui", current_exe);
++    let cm_running = std::process::Command::new("ps")
++        .arg("aux")
++        .output()
++        .map(|output| {
++            String::from_utf8_lossy(&output.stdout)
++                .lines()
++                .any(|line| line.contains(&expected))
++        })
++        .unwrap_or(false);
++    if cm_running {
++        log::info!("skip cm-no-ui prewarm, already running");
++    } else {
++        log::info!("prewarm connection manager by --cm-no-ui");
++        hbb_common::allow_err!(crate::run_me(vec!["--cm-no-ui"]));
++    }
++}
++
+ #[inline]
+ #[cfg(all(feature = "flutter", feature = "plugin_framework"))]
+ #[cfg(not(any(target_os = "android", target_os = "ios")))]
+diff --git a/src/server.rs b/src/server.rs
+index 39d0add..74076bb 100644
+--- a/src/server.rs
++++ b/src/server.rs
+@@ -24,7 +24,7 @@ use hbb_common::{
+     sodiumoxide::crypto::{box_, sign},
+     timeout, tokio, ResultType, Stream,
+ };
+-use scrap::camera;
++use scrap::{camera, Display};
+ #[cfg(not(any(target_os = "android", target_os = "ios")))]
+ use service::ServiceTmpl;
+ use service::{EmptyExtraFieldService, GenericService, Service, Subscriber};
+@@ -537,6 +537,11 @@ pub async fn start_server(_is_server: bool) {
+ #[cfg(not(any(target_os = "android", target_os = "ios")))]
+ #[tokio::main]
+ pub async fn start_server(is_server: bool, no_server: bool) {
++    #[cfg(target_os = "linux")]
++    if is_server {
++        init_custom_linux_input_env();
++    }
++
+     use std::sync::Once;
+     static ONCE: Once = Once::new();
+     ONCE.call_once(|| {
+@@ -563,8 +568,9 @@ pub async fn start_server(is_server: bool, no_server: bool) {
+         });
+         input_service::fix_key_down_timeout_loop();
+         #[cfg(target_os = "linux")]
+-        if input_service::wayland_use_uinput() {
+-            allow_err!(input_service::setup_uinput(0, 1920, 0, 1080).await);
++        if input_service::use_uinput_input() {
++            let (minx, maxx, miny, maxy) = uinput_input_bounds();
++            allow_err!(input_service::setup_uinput(minx, maxx, miny, maxy).await);
+         }
+         #[cfg(any(target_os = "macos", target_os = "linux"))]
+         tokio::spawn(async { sync_and_watch_config_dir().await });
+@@ -610,6 +616,51 @@ pub async fn start_server(is_server: bool, no_server: bool) {
+     }
+ }
+ 
++#[cfg(target_os = "linux")]
++fn init_custom_linux_input_env() {
++    if std::env::var("RUSTDESK_UINPUT_INPUT_FALLBACK").is_err() {
++        std::env::set_var("RUSTDESK_UINPUT_INPUT_FALLBACK", "1");
++    }
++    if std::env::var("RUSTDESK_XCB_MOUSE_FALLBACK").is_err() {
++        std::env::set_var("RUSTDESK_XCB_MOUSE_FALLBACK", "1");
++    }
++    if std::env::var("RUSTDESK_FORCE_CM_NO_UI").is_err() {
++        std::env::set_var("RUSTDESK_FORCE_CM_NO_UI", "1");
++    }
++    if std::env::var("RUSTDESK_DISABLE_TRAY").is_err() {
++        std::env::set_var("RUSTDESK_DISABLE_TRAY", "1");
++    }
++    if std::env::var("RUSTDESK_PREWARM_CM_NO_UI").is_err() {
++        std::env::set_var("RUSTDESK_PREWARM_CM_NO_UI", "1");
++    }
++}
++
++#[cfg(target_os = "linux")]
++fn uinput_input_bounds() -> (i32, i32, i32, i32) {
++    let displays = Display::all().unwrap_or_default();
++    if displays.is_empty() {
++        return (0, 1920, 0, 1080);
++    }
++
++    let mut minx = i32::MAX;
++    let mut miny = i32::MAX;
++    let mut maxx = i32::MIN;
++    let mut maxy = i32::MIN;
++    for display in displays {
++        let (x, y) = display.origin();
++        minx = minx.min(x);
++        miny = miny.min(y);
++        maxx = maxx.max(x + display.width() as i32);
++        maxy = maxy.max(y + display.height() as i32);
++    }
++
++    if minx >= maxx || miny >= maxy {
++        (0, 1920, 0, 1080)
++    } else {
++        (minx, maxx, miny, maxy)
++    }
++}
++
+ #[cfg(target_os = "macos")]
+ #[tokio::main(flavor = "current_thread")]
+ pub async fn start_ipc_url_server() {
+diff --git a/src/server/connection.rs b/src/server/connection.rs
+index 175bb1b..ffd332b 100644
+--- a/src/server/connection.rs
++++ b/src/server/connection.rs
+@@ -4341,7 +4341,11 @@ async fn start_ipc(
+     } else {
+         #[allow(unused_mut)]
+         #[allow(unused_assignments)]
+-        let mut args = vec!["--cm"];
++        let mut args = if std::env::var("RUSTDESK_FORCE_CM_NO_UI").unwrap_or_default() == "1" {
++            vec!["--cm-no-ui"]
++        } else {
++            vec!["--cm"]
++        };
+         #[allow(unused_mut)]
+         #[cfg(target_os = "linux")]
+         let mut user = None;
+diff --git a/src/server/input_service.rs b/src/server/input_service.rs
+index 6a6c6e3..f9af4db 100644
+--- a/src/server/input_service.rs
++++ b/src/server/input_service.rs
+@@ -575,7 +575,7 @@ pub async fn setup_uinput(minx: i32, maxx: i32, miny: i32, maxy: i32) -> ResultT
+ 
+     let keyboard = super::uinput::client::UInputKeyboard::new().await?;
+     log::info!("UInput keyboard created");
+-    let mouse = super::uinput::client::UInputMouse::new().await?;
++    let mouse = super::uinput::client::UInputMouse::new(minx, maxx, miny, maxy).await?;
+     log::info!("UInput mouse created");
+ 
+     ENIGO
+@@ -586,6 +586,18 @@ pub async fn setup_uinput(minx: i32, maxx: i32, miny: i32, maxy: i32) -> ResultT
+     Ok(())
+ }
+ 
++#[cfg(target_os = "linux")]
++pub fn force_uinput_input() -> bool {
++    std::env::var("RUSTDESK_UINPUT_INPUT_FALLBACK")
++        .map(|value| !value.is_empty() && value != "0")
++        .unwrap_or(false)
++}
++
++#[cfg(target_os = "linux")]
++pub fn use_uinput_input() -> bool {
++    crate::is_server() && (force_uinput_input() || !crate::platform::is_x11())
++}
++
+ #[cfg(target_os = "linux")]
+ pub async fn setup_rdp_input() -> ResultType<(), Box<dyn std::error::Error>> {
+     let mut en = ENIGO.lock()?;
+@@ -619,12 +631,13 @@ pub async fn setup_rdp_input() -> ResultType<(), Box<dyn std::error::Error>> {
+ pub async fn update_mouse_resolution(minx: i32, maxx: i32, miny: i32, maxy: i32) -> ResultType<()> {
+     set_uinput_resolution(minx, maxx, miny, maxy).await?;
+ 
+-    std::thread::spawn(|| {
++    std::thread::spawn(move || {
+         if let Some(mouse) = ENIGO.lock().unwrap().get_custom_mouse() {
+             if let Some(mouse) = mouse
+                 .as_mut_any()
+                 .downcast_mut::<super::uinput::client::UInputMouse>()
+             {
++                mouse.set_resolution(minx, maxx, miny, maxy);
+                 allow_err!(mouse.send_refresh());
+             } else {
+                 log::error!("failed downcast uinput mouse");
+@@ -1389,7 +1402,7 @@ fn map_keyboard_mode(evt: &KeyEvent) {
+ 
+     // Wayland
+     #[cfg(target_os = "linux")]
+-    if !crate::platform::linux::is_x11() {
++    if use_uinput_input() {
+         let mut en = ENIGO.lock().unwrap();
+         let code = evt.chr() as u16;
+ 
+diff --git a/src/server/uinput.rs b/src/server/uinput.rs
+index 894ce82..47f33fc 100644
+--- a/src/server/uinput.rs
++++ b/src/server/uinput.rs
+@@ -109,13 +109,32 @@ pub mod client {
+     pub struct UInputMouse {
+         conn: Connection,
+         rt: Runtime,
++        pointer: Option<super::mouce::XcbPointer>,
++        x: i32,
++        y: i32,
++        minx: i32,
++        miny: i32,
++        maxx: i32,
++        maxy: i32,
++        have_pos: bool,
+     }
+ 
+     impl UInputMouse {
+-        pub async fn new() -> ResultType<Self> {
++        pub async fn new(minx: i32, maxx: i32, miny: i32, maxy: i32) -> ResultType<Self> {
+             let conn = ipc::connect(IPC_CONN_TIMEOUT, IPC_POSTFIX_MOUSE).await?;
+             let rt = Runtime::new()?;
+-            Ok(Self { conn, rt })
++            Ok(Self {
++                conn,
++                rt,
++                pointer: super::mouce::XcbPointer::new(),
++                x: minx,
++                y: miny,
++                minx,
++                miny,
++                maxx,
++                maxy,
++                have_pos: false,
++            })
+         }
+ 
+         fn send(&mut self, data: Data) -> ResultType<()> {
+@@ -125,6 +144,38 @@ pub mod client {
+         pub fn send_refresh(&mut self) -> ResultType<()> {
+             self.send(Data::Mouse(DataMouse::Refresh))
+         }
++
++        pub fn set_resolution(&mut self, minx: i32, maxx: i32, miny: i32, maxy: i32) {
++            self.minx = minx;
++            self.maxx = maxx;
++            self.miny = miny;
++            self.maxy = maxy;
++            let (x, y) = self.clamp_pos(self.x, self.y);
++            self.x = x;
++            self.y = y;
++        }
++
++        fn clamp_pos(&self, x: i32, y: i32) -> (i32, i32) {
++            (
++                x.clamp(self.minx, self.maxx.saturating_sub(1)),
++                y.clamp(self.miny, self.maxy.saturating_sub(1)),
++            )
++        }
++
++        fn move_xcb_to(&mut self, x: i32, y: i32) -> bool {
++            let (x, y) = self.clamp_pos(x, y);
++            self.x = x;
++            self.y = y;
++            self.have_pos = true;
++            let ok = match self.pointer.as_ref() {
++                Some(pointer) => pointer.move_to(x, y),
++                None => false,
++            };
++            if !ok {
++                self.pointer = None;
++            }
++            ok
++        }
+     }
+ 
+     impl MouseControllable for UInputMouse {
+@@ -137,10 +188,15 @@ pub mod client {
+         }
+ 
+         fn mouse_move_to(&mut self, x: i32, y: i32) {
+-            allow_err!(self.send(Data::Mouse(DataMouse::MoveTo(x, y))));
++            if !self.move_xcb_to(x, y) {
++                allow_err!(self.send(Data::Mouse(DataMouse::MoveTo(x, y))));
++            }
+         }
+         fn mouse_move_relative(&mut self, x: i32, y: i32) {
+-            allow_err!(self.send(Data::Mouse(DataMouse::MoveRelative(x, y))));
++            let (target_x, target_y) = self.clamp_pos(self.x + x, self.y + y);
++            if !self.move_xcb_to(target_x, target_y) {
++                allow_err!(self.send(Data::Mouse(DataMouse::MoveRelative(x, y))));
++            }
+         }
+         // TODO: handle error???
+         fn mouse_down(&mut self, button: MouseButton) -> enigo::ResultType {
+@@ -309,6 +365,10 @@ pub mod service {
+                 ('/', (evdev::Key::KEY_SLASH, false)),
+                 (';', (evdev::Key::KEY_SEMICOLON, false)),
+                 ('\'', (evdev::Key::KEY_APOSTROPHE, false)),
++                (' ', (evdev::Key::KEY_SPACE, false)),
++                ('\n', (evdev::Key::KEY_ENTER, false)),
++                ('\r', (evdev::Key::KEY_ENTER, false)),
++                ('\t', (evdev::Key::KEY_TAB, false)),
+ 
+                 // Shift + key
+                 ('A', (evdev::Key::KEY_A, true)),
+@@ -412,6 +472,46 @@ pub mod service {
+         bail!("Failed to map key {:?}", &key);
+     }
+ 
++    fn emit_key(keyboard: &mut VirtualDevice, key: evdev::Key, down: bool) {
++        let event = InputEvent::new(EventType::KEY, key.code(), if down { 1 } else { 0 });
++        allow_err!(keyboard.emit(&[event]));
++    }
++
++    fn key_down_mapped(keyboard: &mut VirtualDevice, key: evdev::Key, is_shift: bool) {
++        if is_shift {
++            emit_key(keyboard, evdev::Key::KEY_LEFTSHIFT, true);
++        }
++        emit_key(keyboard, key, true);
++    }
++
++    fn key_up_mapped(keyboard: &mut VirtualDevice, key: evdev::Key, is_shift: bool) {
++        emit_key(keyboard, key, false);
++        if is_shift {
++            emit_key(keyboard, evdev::Key::KEY_LEFTSHIFT, false);
++        }
++    }
++
++    fn key_click_mapped(keyboard: &mut VirtualDevice, key: evdev::Key, is_shift: bool) {
++        if is_shift {
++            emit_key(keyboard, evdev::Key::KEY_LEFTSHIFT, true);
++        }
++        emit_key(keyboard, key, true);
++        emit_key(keyboard, key, false);
++        if is_shift {
++            emit_key(keyboard, evdev::Key::KEY_LEFTSHIFT, false);
++        }
++    }
++
++    fn type_sequence(keyboard: &mut VirtualDevice, seq: &str) {
++        for chr in seq.chars() {
++            let key = enigo::Key::Layout(chr);
++            match map_key(&key) {
++                Ok((mapped, is_shift)) => key_click_mapped(keyboard, mapped, is_shift),
++                Err(e) => log::debug!("failed to type uinput sequence char {:?}: {}", chr, e),
++            }
++        }
++    }
++
+     async fn ipc_send_data(stream: &mut Connection, data: &Data) {
+         allow_err!(stream.send(data).await);
+     }
+@@ -423,8 +523,8 @@ pub mod service {
+     ) {
+         log::trace!("handle_keyboard {:?}", &data);
+         match data {
+-            DataKeyboard::Sequence(_seq) => {
+-                // ignore
++            DataKeyboard::Sequence(seq) => {
++                type_sequence(keyboard, seq);
+             }
+             DataKeyboard::KeyDown(enigo::Key::Raw(code)) => {
+                 let down_event = InputEvent::new(EventType::KEY, *code - 8, 1);
+@@ -436,26 +536,17 @@ pub mod service {
+             }
+             DataKeyboard::KeyDown(key) => {
+                 if let Ok((k, is_shift)) = map_key(key) {
+-                    if is_shift {
+-                        let down_event =
+-                            InputEvent::new(EventType::KEY, evdev::Key::KEY_LEFTSHIFT.code(), 1);
+-                        allow_err!(keyboard.emit(&[down_event]));
+-                    }
+-                    let down_event = InputEvent::new(EventType::KEY, k.code(), 1);
+-                    allow_err!(keyboard.emit(&[down_event]));
++                    key_down_mapped(keyboard, k, is_shift);
+                 }
+             }
+             DataKeyboard::KeyUp(key) => {
+-                if let Ok((k, _)) = map_key(key) {
+-                    let up_event = InputEvent::new(EventType::KEY, k.code(), 0);
+-                    allow_err!(keyboard.emit(&[up_event]));
++                if let Ok((k, is_shift)) = map_key(key) {
++                    key_up_mapped(keyboard, k, is_shift);
+                 }
+             }
+             DataKeyboard::KeyClick(key) => {
+-                if let Ok((k, _)) = map_key(key) {
+-                    let down_event = InputEvent::new(EventType::KEY, k.code(), 1);
+-                    let up_event = InputEvent::new(EventType::KEY, k.code(), 0);
+-                    allow_err!(keyboard.emit(&[down_event, up_event]));
++                if let Ok((k, is_shift)) = map_key(key) {
++                    key_click_mapped(keyboard, k, is_shift);
+                 }
+             }
+             DataKeyboard::GetKeyState(key) => {
+@@ -772,6 +863,7 @@ pub mod service {
+ // https://github.com/emrebicer/mouce
+ mod mouce {
+     use std::{
++        ffi::c_void,
+         fs::File,
+         io::{Error, ErrorKind, Result},
+         mem::size_of,
+@@ -779,7 +871,7 @@ mod mouce {
+             raw::{c_char, c_int, c_long, c_uint, c_ulong, c_ushort},
+             unix::{fs::OpenOptionsExt, io::AsRawFd},
+         },
+-        thread,
++        ptr, thread,
+         time::Duration,
+     };
+ 
+@@ -791,6 +883,7 @@ mod mouce {
+     const UI_SET_KEYBIT: c_ulong = 1074025829;
+     const UI_SET_RELBIT: c_ulong = 1074025830;
+     const UI_SET_ABSBIT: c_ulong = 1074025831;
++    const UI_SET_PROPBIT: c_ulong = 1074025838;
+     const UI_DEV_SETUP: c_ulong = 1079792899;
+     const UI_DEV_CREATE: c_ulong = 21761;
+     const UI_DEV_DESTROY: c_uint = 21762;
+@@ -798,8 +891,6 @@ mod mouce {
+     pub const EV_KEY: c_int = 0x01;
+     pub const EV_REL: c_int = 0x02;
+     pub const EV_ABS: c_int = 0x03;
+-    pub const REL_X: c_uint = 0x00;
+-    pub const REL_Y: c_uint = 0x01;
+     pub const ABS_X: c_uint = 0x00;
+     pub const ABS_Y: c_uint = 0x01;
+     pub const REL_WHEEL: c_uint = 0x08;
+@@ -812,19 +903,81 @@ mod mouce {
+     pub const BTN_FORWARD: c_int = 0x115;
+     pub const BTN_BACK: c_int = 0x116;
+     pub const BTN_TASK: c_int = 0x117;
++    const INPUT_PROP_POINTER: c_int = 0x00;
+     const SYN_REPORT: c_int = 0x00;
+     const EV_SYN: c_int = 0x00;
+     const BUS_USB: c_ushort = 0x03;
++    const ABS_CNT: usize = 64;
++
++    type XcbConnection = c_void;
++    type XcbSetup = c_void;
++    type XcbWindow = u32;
++
++    #[repr(C)]
++    #[derive(Clone, Copy)]
++    struct XcbVoidCookie {
++        sequence: u32,
++    }
++
++    #[repr(C)]
++    struct XcbScreenIterator {
++        data: *mut XcbScreen,
++        rem: c_int,
++        index: c_int,
++    }
++
++    #[repr(C)]
++    struct XcbScreen {
++        root: XcbWindow,
++        default_colormap: u32,
++        white_pixel: u32,
++        black_pixel: u32,
++        current_input_masks: u32,
++        width_in_pixels: u16,
++        height_in_pixels: u16,
++        width_in_millimeters: u16,
++        height_in_millimeters: u16,
++        min_installed_maps: u16,
++        max_installed_maps: u16,
++        root_visual: u32,
++        backing_stores: u8,
++        save_unders: u8,
++        root_depth: u8,
++        allowed_depths_len: u8,
++    }
++
++    #[link(name = "xcb")]
++    extern "C" {
++        fn xcb_connect(displayname: *const c_char, screenp: *mut c_int) -> *mut XcbConnection;
++        fn xcb_disconnect(c: *mut XcbConnection);
++        fn xcb_connection_has_error(c: *mut XcbConnection) -> c_int;
++        fn xcb_get_setup(c: *mut XcbConnection) -> *const XcbSetup;
++        fn xcb_setup_roots_iterator(r: *const XcbSetup) -> XcbScreenIterator;
++        fn xcb_screen_next(i: *mut XcbScreenIterator);
++        fn xcb_warp_pointer(
++            c: *mut XcbConnection,
++            src_window: XcbWindow,
++            dst_window: XcbWindow,
++            src_x: i16,
++            src_y: i16,
++            src_width: u16,
++            src_height: u16,
++            dst_x: i16,
++            dst_y: i16,
++        ) -> XcbVoidCookie;
++        fn xcb_flush(c: *mut XcbConnection) -> c_int;
++    }
+ 
+     /// uinput types
+     #[repr(C)]
+     struct UInputSetup {
+         id: InputId,
+         name: [c_char; UINPUT_MAX_NAME_SIZE],
+-        ff_effects_max: c_ulong,
++        ff_effects_max: c_uint,
+     }
+ 
+     #[repr(C)]
++    #[derive(Clone, Copy)]
+     struct InputId {
+         bustype: c_ushort,
+         vendor: c_ushort,
+@@ -862,9 +1015,20 @@ mod mouce {
+         pub resolution: c_int,
+     }
+ 
++    #[repr(C)]
++    struct UinputUserDev {
++        name: [c_char; UINPUT_MAX_NAME_SIZE],
++        id: InputId,
++        ff_effects_max: c_int,
++        absmax: [c_int; ABS_CNT],
++        absmin: [c_int; ABS_CNT],
++        absfuzz: [c_int; ABS_CNT],
++        absflat: [c_int; ABS_CNT],
++    }
++
+     extern "C" {
+         fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
+-        fn write(fd: c_int, buf: *mut InputEvent, count: usize) -> c_long;
++        fn write(fd: c_int, buf: *const c_void, count: usize) -> c_long;
+     }
+ 
+     #[derive(Debug, Copy, Clone)]
+@@ -889,8 +1053,121 @@ mod mouce {
+ 
+     const UINPUT_MAX_NAME_SIZE: usize = 80;
+ 
++    pub(super) struct XcbPointer {
++        connection: *mut XcbConnection,
++        root: XcbWindow,
++    }
++
++    unsafe impl Send for XcbPointer {}
++
++    impl XcbPointer {
++        pub(super) fn new() -> Option<Self> {
++            if !prefer_xcb_mouse() {
++                return None;
++            }
++
++            let mut screen_num = 0;
++            let connection = unsafe { xcb_connect(ptr::null(), &mut screen_num) };
++            if connection.is_null() {
++                return None;
++            }
++            if unsafe { xcb_connection_has_error(connection) } != 0 {
++                unsafe {
++                    xcb_disconnect(connection);
++                }
++                return None;
++            }
++
++            let setup = unsafe { xcb_get_setup(connection) };
++            if setup.is_null() {
++                unsafe {
++                    xcb_disconnect(connection);
++                }
++                return None;
++            }
++
++            let mut iter = unsafe { xcb_setup_roots_iterator(setup) };
++            for _ in 0..screen_num.max(0) {
++                if iter.rem <= 0 {
++                    break;
++                }
++                unsafe {
++                    xcb_screen_next(&mut iter);
++                }
++            }
++            if iter.rem <= 0 || iter.data.is_null() {
++                unsafe {
++                    xcb_disconnect(connection);
++                }
++                return None;
++            }
++
++            let screen = unsafe { &*iter.data };
++            Some(Self {
++                connection,
++                root: screen.root,
++            })
++        }
++
++        pub(super) fn move_to(&self, x: i32, y: i32) -> bool {
++            if self.connection.is_null() {
++                return false;
++            }
++
++            unsafe {
++                xcb_warp_pointer(
++                    self.connection,
++                    0,
++                    self.root,
++                    0,
++                    0,
++                    0,
++                    0,
++                    x.clamp(i16::MIN as i32, i16::MAX as i32) as i16,
++                    y.clamp(i16::MIN as i32, i16::MAX as i32) as i16,
++                );
++                xcb_flush(self.connection);
++                xcb_connection_has_error(self.connection) == 0
++            }
++        }
++    }
++
++    impl Drop for XcbPointer {
++        fn drop(&mut self) {
++            if !self.connection.is_null() {
++                unsafe {
++                    xcb_disconnect(self.connection);
++                }
++                self.connection = ptr::null_mut();
++            }
++        }
++    }
++
++    fn prefer_xcb_mouse() -> bool {
++        std::env::var("RUSTDESK_XCB_MOUSE_FALLBACK")
++            .map(|value| !value.is_empty() && value != "0")
++            .unwrap_or(true)
++    }
++
++    fn device_name() -> [c_char; UINPUT_MAX_NAME_SIZE] {
++        let mut name = [0 as c_char; UINPUT_MAX_NAME_SIZE];
++        let device_bytes = b"RustDesk absolute mouse";
++        for (dst, src) in name.iter_mut().zip(device_bytes.iter()) {
++            *dst = *src as c_char;
++        }
++        name
++    }
++
+     pub struct UInputMouseManager {
+         uinput_file: File,
++        xcb_pointer: Option<XcbPointer>,
++        x: i32,
++        y: i32,
++        minx: i32,
++        miny: i32,
++        maxx: i32,
++        maxy: i32,
++        have_pos: bool,
+     }
+ 
+     impl UInputMouseManager {
+@@ -900,8 +1177,18 @@ mod mouce {
+                     .write(true)
+                     .custom_flags(O_NONBLOCK)
+                     .open("/dev/uinput")?,
++                xcb_pointer: XcbPointer::new(),
++                x: rng_x.0,
++                y: rng_y.0,
++                minx: rng_x.0,
++                miny: rng_y.0,
++                maxx: rng_x.1,
++                maxy: rng_y.1,
++                have_pos: false,
+             };
+             let fd = manager.uinput_file.as_raw_fd();
++            let max_abs_x = rng_x.1.saturating_sub(1);
++            let max_abs_y = rng_y.1.saturating_sub(1);
+             unsafe {
+                 // For press events (also needed for mouse movement)
+                 ioctl(fd, UI_SET_EVBIT, EV_KEY);
+@@ -911,6 +1198,7 @@ mod mouce {
+ 
+                 // For mouse movement
+                 ioctl(fd, UI_SET_EVBIT, EV_ABS);
++                ioctl(fd, UI_SET_PROPBIT, INPUT_PROP_POINTER);
+                 ioctl(fd, UI_SET_ABSBIT, ABS_X);
+                 ioctl(
+                     fd,
+@@ -918,9 +1206,9 @@ mod mouce {
+                     &UinputAbsSetup {
+                         code: ABS_X as _,
+                         absinfo: InputAbsinfo {
+-                            value: 0,
++                            value: rng_x.0,
+                             minimum: rng_x.0,
+-                            maximum: rng_x.1,
++                            maximum: max_abs_x,
+                             fuzz: 0,
+                             flat: 0,
+                             resolution: 0,
+@@ -934,9 +1222,9 @@ mod mouce {
+                     &UinputAbsSetup {
+                         code: ABS_Y as _,
+                         absinfo: InputAbsinfo {
+-                            value: 0,
++                            value: rng_y.0,
+                             minimum: rng_y.0,
+-                            maximum: rng_y.1,
++                            maximum: max_abs_y,
+                             fuzz: 0,
+                             flat: 0,
+                             resolution: 0,
+@@ -945,40 +1233,11 @@ mod mouce {
+                 );
+ 
+                 ioctl(fd, UI_SET_EVBIT, EV_REL);
+-                ioctl(fd, UI_SET_RELBIT, REL_X);
+-                ioctl(fd, UI_SET_RELBIT, REL_Y);
+                 ioctl(fd, UI_SET_RELBIT, REL_WHEEL);
+                 ioctl(fd, UI_SET_RELBIT, REL_HWHEEL);
+             }
+ 
+-            let mut usetup = UInputSetup {
+-                id: InputId {
+-                    bustype: BUS_USB,
+-                    // Random vendor and product
+-                    vendor: 0x2222,
+-                    product: 0x3333,
+-                    version: 0,
+-                },
+-                name: [0; UINPUT_MAX_NAME_SIZE],
+-                ff_effects_max: 0,
+-            };
+-
+-            let mut device_bytes: Vec<c_char> = "mouce-library-fake-mouse"
+-                .chars()
+-                .map(|ch| ch as c_char)
+-                .collect();
+-
+-            // Fill the rest of the name buffer with empty chars
+-            for _ in 0..UINPUT_MAX_NAME_SIZE - device_bytes.len() {
+-                device_bytes.push('\0' as c_char);
+-            }
+-
+-            usetup.name.copy_from_slice(&device_bytes);
+-
+-            unsafe {
+-                ioctl(fd, UI_DEV_SETUP, &usetup);
+-                ioctl(fd, UI_DEV_CREATE);
+-            }
++            manager.setup_device(fd, (rng_x.0, max_abs_x), (rng_y.0, max_abs_y))?;
+ 
+             // On UI_DEV_CREATE the kernel will create the device node for this
+             // device. We are inserting a pause here so that userspace has time
+@@ -989,9 +1248,49 @@ mod mouce {
+             Ok(manager)
+         }
+ 
++        fn setup_device(&self, fd: c_int, rng_x: (i32, i32), rng_y: (i32, i32)) -> Result<()> {
++            let name = device_name();
++            let id = InputId {
++                bustype: BUS_USB,
++                // Random vendor and product
++                vendor: 0x2222,
++                product: 0x3333,
++                version: 1,
++            };
++
++            let usetup = UInputSetup {
++                id,
++                name,
++                ff_effects_max: 0,
++            };
++
++            let modern_ok = unsafe { ioctl(fd, UI_DEV_SETUP, &usetup) } >= 0;
++            if !modern_ok {
++                let mut legacy = UinputUserDev {
++                    name,
++                    id,
++                    ff_effects_max: 0,
++                    absmax: [0; ABS_CNT],
++                    absmin: [0; ABS_CNT],
++                    absfuzz: [0; ABS_CNT],
++                    absflat: [0; ABS_CNT],
++                };
++                legacy.absmin[ABS_X as usize] = rng_x.0;
++                legacy.absmax[ABS_X as usize] = rng_x.1;
++                legacy.absmin[ABS_Y as usize] = rng_y.0;
++                legacy.absmax[ABS_Y as usize] = rng_y.1;
++                self.write_raw(&legacy)?;
++            }
++
++            if unsafe { ioctl(fd, UI_DEV_CREATE) } < 0 {
++                return Err(Error::last_os_error());
++            }
++            Ok(())
++        }
++
+         /// Write the given event to the uinput file
+         fn emit(&self, r#type: c_int, code: c_int, value: c_int) -> Result<()> {
+-            let mut event = InputEvent {
++            let event = InputEvent {
+                 time: TimeVal {
+                     tv_sec: 0,
+                     tv_usec: 0,
+@@ -1000,11 +1299,15 @@ mod mouce {
+                 code: code as c_ushort,
+                 value,
+             };
++            self.write_raw(&event)
++        }
++
++        fn write_raw<T>(&self, value: &T) -> Result<()> {
+             let fd = self.uinput_file.as_raw_fd();
+ 
+             unsafe {
+-                let count = size_of::<InputEvent>();
+-                let written_bytes = write(fd, &mut event, count);
++                let count = size_of::<T>();
++                let written_bytes = write(fd, value as *const T as *const c_void, count);
+                 if written_bytes == -1 || written_bytes != count as c_long {
+                     return Err(Error::new(
+                         ErrorKind::Other,
+@@ -1026,23 +1329,25 @@ mod mouce {
+             Ok(())
+         }
+ 
+-        /// Move the mouse relative to the current position
+-        fn move_relative_(&self, x: i32, y: i32) -> Result<()> {
+-            // uinput does not move the mouse in pixels but uses `units`. I couldn't
+-            // find information regarding to this uinput `unit`, but according to
+-            // my findings 1 unit corresponds to exactly 2 pixels.
+-            //
+-            // To achieve the expected behavior; divide the parameters by 2
+-            //
+-            // This seems like there is a bug in this crate, but the
+-            // behavior is the same on other projects that make use of
+-            // uinput. e.g. `ydotool`. When you try to move your mouse,
+-            // it will move 2x further pixels
+-            self.emit(EV_REL, REL_X as c_int, (x as f32 / 2.).ceil() as c_int)?;
+-            self.emit(EV_REL, REL_Y as c_int, (y as f32 / 2.).ceil() as c_int)?;
++        fn move_absolute_(&self, x: i32, y: i32) -> Result<()> {
++            if let Some(pointer) = &self.xcb_pointer {
++                if pointer.move_to(x, y) {
++                    return Ok(());
++                }
++            }
++
++            self.emit(EV_ABS, ABS_X as c_int, x)?;
++            self.emit(EV_ABS, ABS_Y as c_int, y)?;
+             self.syncronize()
+         }
+ 
++        fn clamp_pos(&self, x: i32, y: i32) -> (i32, i32) {
++            (
++                x.clamp(self.minx, self.maxx.saturating_sub(1)),
++                y.clamp(self.miny, self.maxy.saturating_sub(1)),
++            )
++        }
++
+         fn map_btn(button: &MouseButton) -> c_int {
+             match button {
+                 MouseButton::Left => BTN_LEFT,
+@@ -1056,22 +1361,20 @@ mod mouce {
+             }
+         }
+ 
+-        pub fn move_to(&self, x: usize, y: usize) -> Result<()> {
+-            // // For some reason, absolute mouse move events are not working on uinput
+-            // // (as I understand those events are intended for touch events)
+-            // //
+-            // // As a work around solution; first set the mouse to top left, then
+-            // // call relative move function to simulate an absolute move event
+-            //self.move_relative(i32::MIN, i32::MIN)?;
+-            //self.move_relative(x as i32, y as i32)
+-
+-            self.emit(EV_ABS, ABS_X as c_int, x as c_int)?;
+-            self.emit(EV_ABS, ABS_Y as c_int, y as c_int)?;
+-            self.syncronize()
++        pub fn move_to(&mut self, x: usize, y: usize) -> Result<()> {
++            let (x, y) = self.clamp_pos(x as i32, y as i32);
++            self.x = x;
++            self.y = y;
++            self.have_pos = true;
++            self.move_absolute_(x, y)
+         }
+ 
+-        pub fn move_relative(&self, x_offset: i32, y_offset: i32) -> Result<()> {
+-            self.move_relative_(x_offset, y_offset)
++        pub fn move_relative(&mut self, x_offset: i32, y_offset: i32) -> Result<()> {
++            let (x, y) = self.clamp_pos(self.x + x_offset, self.y + y_offset);
++            self.x = x;
++            self.y = y;
++            self.have_pos = true;
++            self.move_absolute_(x, y)
+         }
+ 
+         pub fn press_button(&self, button: &MouseButton) -> Result<()> {
