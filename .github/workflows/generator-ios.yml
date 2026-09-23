@@ -240,13 +240,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # flutter build ipa --no-codesign archives but intentionally skips .ipa.
+          # Package Payload/*.app ourselves from the xcarchive / iphoneos output.
           pushd flutter
-          flutter build ipa --release --no-codesign
+          flutter build ios --release --no-codesign
           popd
-          IPA=$(find ./flutter/build/ios/ipa -type f -name '*.ipa' | head -n 1)
-          test -n "$IPA"
-          test -s "$IPA"
-          cp "$IPA" "./${{ env.filename }}.ipa"
+          APP=$(find ./flutter/build/ios -type d -name 'Runner.app' | head -n 1)
+          test -n "$APP"
+          test -d "$APP"
+          STAGE=$(mktemp -d)
+          mkdir -p "$STAGE/Payload"
+          cp -R "$APP" "$STAGE/Payload/"
+          (
+            cd "$STAGE"
+            /usr/bin/zip -r -y unsigned.ipa Payload >/dev/null
+          )
+          cp "$STAGE/unsigned.ipa" "./${{ env.filename }}.ipa"
+          rm -rf "$STAGE"
+          test -s "./${{ env.filename }}.ipa"
           ls -lh "./${{ env.filename }}.ipa"
           echo "Built unsigned IPA with Bundle ID ${{ env.IOS_BUNDLE_ID }}"
 
@@ -259,24 +270,32 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Fetch rdgen upload helper
+        if: ${{ env.rdgen == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          path: _rdgen_tools
+          sparse-checkout: |
+            .github/scripts
+          sparse-checkout-cone-mode: false
+
       - name: send IPA to rdgen server
         if: ${{ env.rdgen == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST \
-            -H "Content-Type: multipart/form-data" \
-            -H "Authorization: Bearer ${{ env.token }}" \
-            -F "file=@${{ github.workspace }}/${{ env.filename }}.ipa" \
-            -F "uuid=${{ env.uuid }}" \
-            "${{ secrets.GENURL }}/save_custom_client"
+          python3 _rdgen_tools/.github/scripts/upload_artifacts_to_rdgen.py \
+            --genurl "${{ secrets.GENURL }}" \
+            --token "${{ env.token }}" \
+            --uuid "${{ env.uuid }}" \
+            "${{ github.workspace }}/${{ env.filename }}.ipa"
 
       - name: send IPA to api server
         if: ${{ env.rdgen == 'false' }}
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST \
+          curl --fail --http1.1 --connect-timeout 30 --max-time 1800 --retry 5 --retry-delay 20 --retry-all-errors -i -X POST \
             -H "Content-Type: multipart/form-data" \
             -H "Authorization: Bearer ${{ env.token }}" \
             -F "file=@${{ github.workspace }}/${{ env.filename }}.ipa" \

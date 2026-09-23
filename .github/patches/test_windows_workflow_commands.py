@@ -139,6 +139,8 @@ class WindowsWorkflowCommandTests(unittest.TestCase):
                     self.assertIn('MSI="./SignOutput/${{ env.filename }}.msi"', upload_step)
                     self.assertIn('test -s "$EXE"', upload_step)
                     self.assertIn('test -s "$MSI"', upload_step)
+                    self.assertIn("upload_artifacts_to_rdgen.py", upload_step)
+                    self.assertIn("--defer", upload_step)
                 else:
                     exe_upload_step = named_step(workflow, "send exe to rdgen server")
                     msi_upload_step = named_step(workflow, "send msi to rdgen server")

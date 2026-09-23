@@ -721,50 +721,50 @@ jobs:
         if: ${{ env.rdgen == 'true' }}
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 10
+          timeout_minutes: 90
           max_attempts: 3
           shell: bash
           command: |
             set -euo pipefail
             test -s "./SignOutput/${{ env.filename }}.exe"
             test -s "./SignOutput/${{ env.filename }}.msi"
-            curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.exe" -F "uuid=${{ env.uuid }}" -F "defer_completion=true" ${{ secrets.GENURL }}/save_custom_client
+            curl --fail --http1.1 --connect-timeout 30 --max-time 1800 --retry 5 --retry-delay 20 --retry-all-errors -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.exe" -F "uuid=${{ env.uuid }}" -F "defer_completion=true" ${{ secrets.GENURL }}/save_custom_client
 
       - name: send msi to rdgen server
         if: ${{ env.rdgen == 'true' }}
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 10
+          timeout_minutes: 90
           max_attempts: 3
           shell: bash
           command: |
             set -euo pipefail
             test -s "./SignOutput/${{ env.filename }}.msi"
-            curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.msi" -F "uuid=${{ env.uuid }}" -F "defer_completion=true" ${{ secrets.GENURL }}/save_custom_client
+            curl --fail --http1.1 --connect-timeout 30 --max-time 1800 --retry 5 --retry-delay 20 --retry-all-errors -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.msi" -F "uuid=${{ env.uuid }}" -F "defer_completion=true" ${{ secrets.GENURL }}/save_custom_client
 
       - name: finalize files on rdgen server
         if: ${{ env.rdgen == 'true' }}
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 10
+          timeout_minutes: 90
           max_attempts: 3
           shell: bash
           command: |
             set -euo pipefail
-            curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: application/json" -H "Authorization: Bearer ${{ env.token }}" --data '{"uuid":"${{ env.uuid }}","platform":"windows","filename":"${{ env.filename }}"}' ${{ secrets.GENURL }}/finalize_custom_client
+            curl --fail --http1.1 --connect-timeout 30 --max-time 1800 --retry 5 --retry-delay 20 --retry-all-errors -i -X POST -H "Content-Type: application/json" -H "Authorization: Bearer ${{ env.token }}" --data '{"uuid":"${{ env.uuid }}","platform":"windows","filename":"${{ env.filename }}"}' ${{ secrets.GENURL }}/finalize_custom_client
 
       - name: send file to api server
         if: ${{ env.rdgen == 'false' }}
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 10
+          timeout_minutes: 90
           max_attempts: 3
           shell: bash
           command: |
             set -euo pipefail
-            curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.exe" ${{ env.apiServer }}/api/save_custom_client
+            curl --fail --http1.1 --connect-timeout 30 --max-time 1800 --retry 5 --retry-delay 20 --retry-all-errors -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.exe" ${{ env.apiServer }}/api/save_custom_client
             if [[ -f "./SignOutput/${{ env.filename }}.msi" ]]; then
-              curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.msi" ${{ env.apiServer }}/api/save_custom_client
+              curl --fail --http1.1 --connect-timeout 30 --max-time 1800 --retry 5 --retry-delay 20 --retry-all-errors -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.msi" ${{ env.apiServer }}/api/save_custom_client
             fi
 
       - name: report generation failure to rdgen server

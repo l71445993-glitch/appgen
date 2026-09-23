@@ -555,6 +555,9 @@ jobs:
       
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # 'tools' package was removed from current Android SDK repos.
+          packages: platform-tools
 
       - name: Sign and verify split APK
         shell: bash
@@ -608,27 +611,40 @@ jobs:
           name: android-split-${{ matrix.job.arch }}
           path: ./signed-apk/${{ env.filename }}-${{ matrix.job.arch }}.apk
 
+      - name: Fetch rdgen upload helper
+        if: ${{ env.rdgen == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          path: _rdgen_tools
+          sparse-checkout: |
+            .github/scripts
+          sparse-checkout-cone-mode: false
+
       - name: send file to rdgen server
         if: ${{ env.rdgen == 'true' }}
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 10
+          timeout_minutes: 90
           max_attempts: 3
           shell: bash
           command: |
             set -euo pipefail
-            curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./signed-apk/${{ env.filename }}-${{ matrix.job.arch }}.apk" -F "uuid=${{ env.uuid }}" ${{ secrets.GENURL }}/save_custom_client
+            python3 _rdgen_tools/.github/scripts/upload_artifacts_to_rdgen.py \
+              --genurl "${{ secrets.GENURL }}" \
+              --token "${{ env.token }}" \
+              --uuid "${{ env.uuid }}" \
+              "./signed-apk/${{ env.filename }}-${{ matrix.job.arch }}.apk"
 
       - name: send file to api server
         if: ${{ env.rdgen == 'false' }}
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 10
+          timeout_minutes: 90
           max_attempts: 3
           shell: bash
           command: |
             set -euo pipefail
-            curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./signed-apk/${{ env.filename }}-${{ matrix.job.arch }}.apk" ${{ env.apiServer }}/api/save_custom_client
+            curl --fail --http1.1 --connect-timeout 30 --max-time 1800 --retry 5 --retry-delay 20 --retry-all-errors -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./signed-apk/${{ env.filename }}-${{ matrix.job.arch }}.apk" ${{ env.apiServer }}/api/save_custom_client
 
   deploy:
     needs: [build-rustdesk-android]
@@ -725,6 +741,9 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # 'tools' package was removed from current Android SDK repos.
+          packages: platform-tools
 
       - name: Sign universal APK
         shell: bash
@@ -792,27 +811,40 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Fetch rdgen upload helper (universal)
+        if: ${{ env.rdgen == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          path: _rdgen_tools
+          sparse-checkout: |
+            .github/scripts
+          sparse-checkout-cone-mode: false
+
       - name: send universal APK to rdgen server
         if: ${{ env.rdgen == 'true' }}
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 10
+          timeout_minutes: 90
           max_attempts: 3
           shell: bash
           command: |
             set -euo pipefail
-            curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./universal-apk/${{ env.filename }}-universal.apk" -F "uuid=${{ env.uuid }}" ${{ secrets.GENURL }}/save_custom_client
+            python3 _rdgen_tools/.github/scripts/upload_artifacts_to_rdgen.py \
+              --genurl "${{ secrets.GENURL }}" \
+              --token "${{ env.token }}" \
+              --uuid "${{ env.uuid }}" \
+              "./universal-apk/${{ env.filename }}-universal.apk"
 
       - name: send universal APK to api server
         if: ${{ env.rdgen == 'false' }}
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 10
+          timeout_minutes: 90
           max_attempts: 3
           shell: bash
           command: |
             set -euo pipefail
-            curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./universal-apk/${{ env.filename }}-universal.apk" ${{ env.apiServer }}/api/save_custom_client
+            curl --fail --http1.1 --connect-timeout 30 --max-time 1800 --retry 5 --retry-delay 20 --retry-all-errors -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./universal-apk/${{ env.filename }}-universal.apk" ${{ env.apiServer }}/api/save_custom_client
 
       - uses: geekyeggo/delete-artifact@v5
         continue-on-error: true

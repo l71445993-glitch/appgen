@@ -538,19 +538,32 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Fetch rdgen upload helper
+        if: ${{ env.rdgen == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          path: _rdgen_tools
+          sparse-checkout: |
+            .github/scripts
+          sparse-checkout-cone-mode: false
+
       - name: send file to rdgen server
         if: ${{ env.rdgen == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.exe" -F "uuid=${{ env.uuid }}" ${{ secrets.GENURL }}/save_custom_client
+          python3 _rdgen_tools/.github/scripts/upload_artifacts_to_rdgen.py \
+            --genurl "${{ secrets.GENURL }}" \
+            --token "${{ env.token }}" \
+            --uuid "${{ env.uuid }}" \
+            "./SignOutput/${{ env.filename }}.exe"
 
       - name: send file to api server
         if: ${{ env.rdgen == 'false' }}
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 10 -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.exe" ${{ env.apiServer }}/api/save_custom_client
+          curl --fail --http1.1 --connect-timeout 30 --max-time 1800 --retry 5 --retry-delay 20 --retry-all-errors -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.exe" ${{ env.apiServer }}/api/save_custom_client
 
   cleanup:
     needs: [build-for-windows-sciter]
