@@ -939,7 +939,14 @@ class GenerateForm(forms.Form):
         required=False,
     )
     #Platform
-    platform = forms.ChoiceField(choices=[('windows','Windows 64 位'),('windows-x86','Windows 32 位'),('linux','Linux'),('android','Android'),('macos','macOS')], initial='windows')
+    platform = forms.ChoiceField(choices=[
+        ('windows', 'Windows 64 位'),
+        ('windows-x86', 'Windows 32 位'),
+        ('linux', 'Linux'),
+        ('android', 'Android'),
+        ('macos', 'macOS'),
+        ('ios', 'iOS（未签名 IPA）'),
+    ], initial='windows')
     version = forms.ChoiceField(
         choices=[('master','nightly'),('1.4.9','1.4.9'),('1.4.8','1.4.8'),('1.4.7','1.4.7'),('1.4.6','1.4.6'),('1.4.5','1.4.5'),('1.4.4','1.4.4'),('1.4.3','1.4.3'),('1.4.2','1.4.2'),('1.4.1','1.4.1'),('1.4.0','1.4.0'),('1.3.9','1.3.9'),('1.3.8','1.3.8'),('1.3.7','1.3.7'),('1.3.6','1.3.6'),('1.3.5','1.3.5'),('1.3.4','1.3.4'),('1.3.3','1.3.3')],
         initial='1.4.9',
@@ -1177,6 +1184,19 @@ class GenerateForm(forms.Form):
         widget=forms.TextInput(
             attrs={
                 "placeholder": "留空则自动 com.rdgen.{配置名}",
+                "autocomplete": "off",
+                "spellcheck": "false",
+            }
+        ),
+    )
+    iosBundleId = forms.CharField(
+        label="iOS Bundle ID",
+        required=False,
+        max_length=120,
+        validators=[ANDROID_APP_ID],
+        widget=forms.TextInput(
+            attrs={
+                "placeholder": "留空则自动 com.rdgen.{配置名}；重签时常需改成你的 ID",
                 "autocomplete": "off",
                 "spellcheck": "false",
             }
@@ -1497,6 +1517,23 @@ class GenerateForm(forms.Form):
                     manual_hide_tray_source or 'hideTray',
                     'Android 不支持系统托盘图标。',
                 )
+
+        if platform == 'ios':
+            unsupported = {
+                'cycleMonitor': '显示器切换按钮',
+                'showStartOnBootCheckbox': '开机自启选项',
+                'defaultStartOnBoot': '默认开机自启',
+                'silentInstallOnDoubleClick': '双击静默安装',
+                'silentAgentMode': '静默被控模式',
+                'incomingCompactMode': '仅被控紧凑布局',
+                'hideTray': '系统托盘图标',
+                'copyIdPasswordButton': 'ID/密码复制按钮',
+            }
+            for field, label in unsupported.items():
+                if cleaned.get(field):
+                    self.add_error(field, f'iOS 不支持{label}。')
+            if cleaned.get('logofile') or cleaned.get('logobase64'):
+                self.add_error('logofile', 'iOS 暂不支持自定义 Logo（请用应用图标）。')
 
         if (
             platform == 'linux'

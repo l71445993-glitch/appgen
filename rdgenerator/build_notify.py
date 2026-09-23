@@ -26,6 +26,7 @@ PLATFORM_LABELS = {
     "linux": "Linux",
     "android": "Android",
     "macos": "macOS",
+    "ios": "iOS",
 }
 
 

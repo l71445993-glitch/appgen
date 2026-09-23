@@ -725,7 +725,7 @@
         .workspace-page .builder-section__content { min-width: 0; }
         .workspace-page .platform, .workspace-page .container { width: auto; max-width: none; margin: 0; padding: 0; gap: 26px; }
         .workspace-page .platform.workspace-toolbar { display: grid; gap: 18px; padding: 0; border: 0; background: transparent; box-shadow: none; }
-        .workspace-page .platform-icons { display: grid; grid-template-columns: repeat(5, minmax(92px,1fr)); gap: 8px; margin: 0; }
+        .workspace-page .platform-icons { display: grid; grid-template-columns: repeat(6, minmax(84px,1fr)); gap: 8px; margin: 0; }
         .workspace-page .platform-icon {
             display: grid;
             grid-template-columns: 28px 1fr;
@@ -894,7 +894,7 @@
             .workspace-page .builder-section__header { display: flex; align-items: baseline; gap: 10px; }
             .workspace-page .builder-section__index { margin: 0; }
             .workspace-page .section + .section { padding: 22px 0 0; border-top: 1px solid #e7edf5; border-left: 0; }
-            .workspace-page .platform-icons { grid-template-columns: repeat(5,minmax(80px,1fr)); overflow-x: auto; }
+            .workspace-page .platform-icons { grid-template-columns: repeat(6,minmax(72px,1fr)); overflow-x: auto; }
         }
         @media (max-width: 560px) {
             .workspace-title { margin-inline: 12px; font-size: 24px; }
@@ -987,6 +987,7 @@
                                 <button type="button" class="platform-icon" data-platform="linux" aria-pressed="false"><i class="fab fa-linux" aria-hidden="true"></i><span>Linux</span><small>桌面端</small></button>
                                 <button type="button" class="platform-icon" data-platform="android" aria-pressed="false"><i class="fab fa-android" aria-hidden="true"></i><span>Android</span><small>移动端</small></button>
                                 <button type="button" class="platform-icon" data-platform="macos" aria-pressed="false"><i class="fab fa-apple" aria-hidden="true"></i><span>macOS</span><small>桌面端</small></button>
+                                <button type="button" class="platform-icon" data-platform="ios" aria-pressed="false"><i class="fab fa-apple" aria-hidden="true"></i><span>iOS</span><small>未签名 IPA</small></button>
                             </div>
                             <label class="visually-hidden" for="{{ form.platform.id_for_label }}">生成平台</label>
                             {{ form.platform }}
@@ -1113,6 +1114,11 @@
                                         <label for="{{ form.macosBundleId.id_for_label }}">macOS Bundle ID</label>
                                         {{ form.macosBundleId }}
                                         <span class="help-text">例 <code>com.company.client</code>。留空自动 <code>com.rdgen.{配置名}</code>。</span>
+                                    </div>
+                                    <div class="field-block field-block--full ios-only-field" id="iosBundleIdBlock" hidden>
+                                        <label for="{{ form.iosBundleId.id_for_label }}">iOS Bundle ID</label>
+                                        {{ form.iosBundleId }}
+                                        <span class="help-text">产出未签名 IPA，自行重签。例 <code>com.company.client</code>；留空自动 <code>com.rdgen.{配置名}</code>。</span>
                                     </div>
                                 </div>
                             </div>
@@ -1425,6 +1431,8 @@
         const linuxCapabilityNotice = document.getElementById('linuxCapabilityNotice');
         const linuxCustomContent = document.querySelectorAll('.linux-custom-content');
         const androidAppIdField = document.getElementById('androidAppIdField');
+        const macosBundleIdBlock = document.getElementById('macosBundleIdBlock');
+        const iosBundleIdBlock = document.getElementById('iosBundleIdBlock');
         const desktopBehaviorSection = document.getElementById('desktopBehaviorSection');
         const silentInstallOption = document.getElementById('silentInstallOption');
         const silentInstallToggle = document.getElementById("{{ form.silentInstallOnDoubleClick.id_for_label }}");
@@ -1769,7 +1777,9 @@
             const smartMultiRelayEnabled = supportsSmartMultiRelay && smartMultiRelayInput.checked;
             const linuxCustomAllowed = platformSelect.value !== 'linux' ||
                 beijingCustomEnabled || smartMultiRelayEnabled;
-            const supportsLogo = platformSelect.value !== 'windows-x86' && platformSelect.value !== 'android';
+            const supportsLogo = platformSelect.value !== 'windows-x86' &&
+                platformSelect.value !== 'android' &&
+                platformSelect.value !== 'ios';
             const supportsPrivacy = platformSelect.value === 'windows';
             linuxCustomContent.forEach(element => {
                 setSectionAvailability(element, linuxCustomAllowed);
@@ -1777,6 +1787,8 @@
             linuxCapabilityNotice.hidden = linuxCustomAllowed;
             smartMultiRelayNotice.hidden = !smartMultiRelayEnabled;
             setOptionAvailability(androidAppIdField, linuxCustomAllowed && platformSelect.value === 'android');
+            setOptionAvailability(macosBundleIdBlock, platformSelect.value === 'macos');
+            setOptionAvailability(iosBundleIdBlock, platformSelect.value === 'ios');
             setOptionAvailability(logoOption, supportsLogo);
             setOptionAvailability(privacyOption, supportsPrivacy);
             if (smartMultiRelayEnabled) {

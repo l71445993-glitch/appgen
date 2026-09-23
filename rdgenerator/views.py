@@ -88,6 +88,7 @@ VALID_ARTIFACT_SUFFIXES = (
     ".appimage",
     ".flatpak",
     ".dmg",
+    ".ipa",
     ".pkg.tar.zst",
 )
 
@@ -226,6 +227,7 @@ def _valid_artifact_filename(filename, platform=None):
         "windows-x86": (".exe",),
         "android": (".apk",),
         "macos": (".dmg",),
+        "ios": (".ipa",),
         "linux": (".deb", ".rpm", ".appimage", ".flatpak", ".pkg.tar.zst"),
     }
     allowed_suffixes = platform_suffixes.get(platform, VALID_ARTIFACT_SUFFIXES)
@@ -590,6 +592,7 @@ def generator_view(request):
                 showStartOnBootCheckbox = True
             sloganText = (form.cleaned_data.get('sloganText') or '').strip()
             macosBundleId = (form.cleaned_data.get('macosBundleId') or '').strip()
+            iosBundleId = (form.cleaned_data.get('iosBundleId') or '').strip()
             defaultImageQuality = (form.cleaned_data.get('defaultImageQuality') or '').strip()
             defaultCodec = (form.cleaned_data.get('defaultCodec') or '').strip()
             preferWebsocket = bool(form.cleaned_data.get('preferWebsocket')) and linuxCustomAllowed
@@ -898,6 +901,8 @@ def generator_view(request):
                 url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-android.yml/dispatches'
             elif platform == 'macos':
                 url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-macos.yml/dispatches'
+            elif platform == 'ios':
+                url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-ios.yml/dispatches'
             else:
                 url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-windows.yml/dispatches'
                 if selfhosted:
@@ -941,6 +946,7 @@ def generator_view(request):
                 "defaultStartOnBoot": 'true' if defaultStartOnBoot else 'false',
                 "sloganText": sloganText,
                 "macosBundleId": macosBundleId,
+                "iosBundleId": iosBundleId,
                 "msiDesktopShortcut": msiDesktopShortcut,
                 "msiStartMenuShortcut": msiStartMenuShortcut,
                 "msiInstallPrinter": msiInstallPrinter,
@@ -1068,6 +1074,7 @@ def generator_view(request):
                     "defaultStartOnBoot": defaultStartOnBoot,
                     "sloganText": sloganText,
                     "macosBundleId": macosBundleId,
+                    "iosBundleId": iosBundleId,
                     "defaultImageQuality": defaultImageQuality,
                     "defaultCodec": defaultCodec,
                     "preferWebsocket": preferWebsocket,
