@@ -213,8 +213,13 @@ jobs:
         shell: bash
         run: |
           BUNDLE_SUFFIX=$(printf '%s' '${{ env.filename }}' | tr '_' '-' | tr '[:upper:]' '[:lower:]')
-          MACOS_BUNDLE_ID="com.rdgen.${BUNDLE_SUFFIX}"
+          if [ -n "${{ env.macosBundleId }}" ]; then
+            MACOS_BUNDLE_ID="${{ env.macosBundleId }}"
+          else
+            MACOS_BUNDLE_ID="com.rdgen.${BUNDLE_SUFFIX}"
+          fi
           export MACOS_BUNDLE_ID
+          echo "MACOS_BUNDLE_ID=${MACOS_BUNDLE_ID}" >> "$GITHUB_ENV"
 
           # MACSTUFF Backup the original files
           cp ./flutter/macos/Runner/Info.plist ./flutter/macos/Runner/Info.plist.bak
@@ -282,6 +287,15 @@ jobs:
           cp ./src/lang/nl.rs ./src/lang/nl.rs.bak
           find ./src/lang -name "*.rs" -exec sed -i '' -e 's|RustDesk|${{ env.appname }}|' {} \;
           sed -i '' -e 's|RustDesk|${{ env.appname }}|' ./src/lang/nl.rs
+          SLOGAN='${{ env.sloganText }}'
+          if [ -z "$SLOGAN" ]; then
+            SLOGAN="Powered by ${{ env.appname }}"
+          fi
+          SLOGAN_ESC=$(printf '%s' "$SLOGAN" | sed -e 's/[&|\\]/\\&/g')
+          sed -i '' -E -e "s/\(\"Slogan_tip\", \"[^\"]*\"\)/(\"Slogan_tip\", \"${SLOGAN_ESC}\")/" ./src/lang/en.rs
+          sed -i '' -E -e "s/\(\"Slogan_tip\", \"[^\"]*\"\)/(\"Slogan_tip\", \"${SLOGAN_ESC}\")/" ./src/lang/nl.rs
+          sed -i '' -e 's|("Your Desktop", "Uw Bureaublad")|("Your Desktop", "Uw ${{ env.appname }}")|' ./src/lang/nl.rs
+          sed -i '' -e 's|("About", "Over")|("About", "Over ${{ env.appname }}")|' ./src/lang/nl.rs
            
           sed -i '' -e 's|https://rustdesk.com|${{ env.urlLink }}|' ./build.py
           sed -i '' -e "s|launchUrl(Uri.parse('https://rustdesk.com'));|launchUrl(Uri.parse('${{ env.urlLink }}'));|" ./flutter/lib/common.dart
@@ -298,20 +312,6 @@ jobs:
           sed -i -e 's|https://rustdesk.com/download|${{ env.downloadLink }}|' ./flutter/lib/desktop/pages/desktop_home_page.dart
           sed -i -e 's|https://rustdesk.com/download|${{ env.downloadLink }}|' ./flutter/lib/mobile/pages/connection_page.dart
           sed -i -e 's|https://rustdesk.com/download|${{ env.downloadLink }}|' ./src/ui/index.tis
-
-          # Update slogan
-          #sed -i '' '/<key>NSHumanReadableCopyright<\/key>/{n;s/<string>.*<\/string>/<string>Copyright 2025 ${{ env.appname }}. All rights reserved.<\/string>/;}' ./flutter/macos/Runner/Info.plist
-          
-          # Update slogan - About in en.rs 
-          sed -i '' -e 's/("Slogan_tip", "Made with heart in this chaotic world!")/("Slogan_tip", "Powered by ${{ env.appname }}")/' ./src/lang/en.rs
-          sed -i '' -e 's/("About RustDesk", "")/("About RustDesk", "About ${{ env.appname }}")/' ./src/lang/en.rs
-          
-
-          # Update slogan - About in nl.rs
-          sed -i '' -e 's/("Slogan_tip", "Ontwikkeld met het hart voor deze chaotische wereld!")/("Slogan_tip", "Powered by ${{ env.appname }}")/' ./src/lang/nl.rs
-          sed -i '' -e 's/("Your Desktop", "Uw Bureaublad")/("Your Desktop", "Uw ${{ env.appname }}")/' ./src/lang/nl.rs
-          sed -i '' -e 's/("About RustDesk", "Over RustDesk")/("About RustDesk", "Over ${{ env.appname }}")/' ./src/lang/nl.rs
-          sed -i '' -e 's/("About", "Over")/("About", "Over ${{ env.appname }}")/' ./src/lang/nl.rs
 
           sed -i -e 's|rs-ny.rustdesk.com|${{ env.server }}|' ./libs/hbb_common/src/config.rs
           sed -i -e 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|' ./libs/hbb_common/src/config.rs
@@ -643,7 +643,12 @@ jobs:
         run: |
           wget https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/.github/patches/validate_customization.py
           BUNDLE_SUFFIX=$(printf '%s' '${{ env.filename }}' | tr '_' '-' | tr '[:upper:]' '[:lower:]')
-          python validate_customization.py --platform=macos --server="${{ env.server }}" --key="${{ env.key }}" --api-server="${{ env.apiServer }}" --app-name="${{ env.appname }}" --company="${{ env.compname }}" --url-link="${{ env.urlLink }}" --download-link="${{ env.downloadLink }}" --macos-bundle-id="com.rdgen.${BUNDLE_SUFFIX}"
+          if [ -n "${{ env.macosBundleId }}" ]; then
+            EXPECTED_BUNDLE_ID="${{ env.macosBundleId }}"
+          else
+            EXPECTED_BUNDLE_ID="com.rdgen.${BUNDLE_SUFFIX}"
+          fi
+          python validate_customization.py --platform=macos --server="${{ env.server }}" --key="${{ env.key }}" --api-server="${{ env.apiServer }}" --app-name="${{ env.appname }}" --company="${{ env.compname }}" --url-link="${{ env.urlLink }}" --download-link="${{ env.downloadLink }}" --macos-bundle-id="${EXPECTED_BUNDLE_ID}"
 
       - name: Build rustdesk
         run: |
@@ -800,7 +805,12 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$INFO_PLIST")" = "${{ env.appname }}"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$INFO_PLIST")" = "${{ env.appname }}"
           BUNDLE_SUFFIX=$(printf '%s' '${{ env.filename }}' | tr '_' '-' | tr '[:upper:]' '[:lower:]')
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST")" = "com.rdgen.${BUNDLE_SUFFIX}"
+          if [ -n "${{ env.macosBundleId }}" ]; then
+            EXPECTED_BUNDLE_ID="${{ env.macosBundleId }}"
+          else
+            EXPECTED_BUNDLE_ID="com.rdgen.${BUNDLE_SUFFIX}"
+          fi
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST")" = "${EXPECTED_BUNDLE_ID}"
 
           EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$INFO_PLIST")
           EXECUTABLE_PATH="$APP_BUNDLE/Contents/MacOS/$EXECUTABLE"

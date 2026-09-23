@@ -1,0 +1,43 @@
+{% extends "base_admin.html" %}
+{% block title %}{{ page_title }} | 超管后台{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div class="page-heading__copy">
+        <span class="eyebrow">WECOM</span>
+        <h1>{{ page_title }}</h1>
+        <p class="page-heading__subtitle">填写企业微信群机器人 Webhook，用于超管后台提醒（异地登录、构建失败/成功等）。</p>
+    </div>
+    <a class="button button--secondary" href="{% url 'console:settings' %}">返回设置</a>
+</div>
+<section class="panel form-panel">
+    <form method="post">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        {% for field in form %}
+        <div class="field{% if field.field.widget.input_type == 'checkbox' %} field--check{% endif %}">
+            {% if field.field.widget.input_type == 'checkbox' %}
+                {{ field }}{{ field.label_tag }}
+            {% else %}
+                {{ field.label_tag }}{{ field }}
+            {% endif %}
+            {{ field.errors }}
+            {% if field.help_text %}<span class="helptext">{{ field.help_text }}</span>{% endif %}
+        </div>
+        {% endfor %}
+        <div class="form-actions">
+            <button class="button" type="submit" name="action" value="save">保存</button>
+            <button class="button button--secondary" type="submit" name="action" value="test">发送测试消息</button>
+        </div>
+    </form>
+    <p class="helptext" style="margin-top:18px;">
+        {% if config.is_configured %}
+        当前状态：<strong>已配置可用</strong>
+        {% elif config.enabled %}
+        当前状态：<strong>未完成</strong>（Webhook 无效或不是企业微信官方地址）
+        {% else %}
+        当前状态：<strong>已关闭</strong>
+        {% endif %}
+        {% if config.updated_at %}<br>上次保存：{{ config.updated_at }}{% endif %}
+    </p>
+</section>
+{% endblock %}

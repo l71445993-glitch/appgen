@@ -72,6 +72,17 @@ class WindowsWorkflowCommandTests(unittest.TestCase):
                     workflow.index("      - name: Configure MSI Chinese UI"),
                     workflow.index("      - name: Build msi"),
                 )
+                defaults_step = named_step(
+                    workflow, "Configure MSI install-wizard defaults"
+                )
+                self.assertIn("configure_msi_install_defaults.py", defaults_step)
+                self.assertIn("msiDesktopShortcut", defaults_step)
+                self.assertLess(
+                    workflow.index(
+                        "      - name: Configure MSI install-wizard defaults"
+                    ),
+                    workflow.index("      - name: Build msi"),
+                )
                 build_step = named_step(workflow, "Build msi")
                 self.assertIn("Get-ChildItem ./Package/bin/x64/Release -Recurse -Filter Package.msi", build_step)
                 self.assertNotIn("Release/en-us/Package.msi", build_step)

@@ -28,6 +28,8 @@ import uuid
 import pyzipper
 from urllib.parse import urlencode, urlsplit
 from django.conf import settings as _settings
+from .build_config import build_config_snapshot
+from .build_notify import maybe_notify_build_success
 from .forms import GenerateForm
 from .models import (
     create_github_run_with_reservation,
@@ -61,6 +63,22 @@ TERMINAL_RUN_STATUSES = {
 FAILED_TERMINAL_RUN_STATUSES = TERMINAL_RUN_STATUSES - {"success"}
 ARTIFACT_PENDING_STATUS = "artifacts_pending"
 ARTIFACT_INCOMPLETE_STATUS = "artifact_incomplete"
+# Typical GitHub Actions wall time used only for soft progress estimation.
+EXPECTED_BUILD_SECONDS = 40 * 60
+WAITING_STATUS_LABELS = {
+    "queued": "排队中",
+    "starting": "准备中",
+    "in_progress": "构建中",
+    "artifacts_pending": "正在上传安装包",
+    "success": "构建成功",
+    "failure": "构建失败",
+    "artifact_incomplete": "文件不完整",
+    "dispatch_failed": "提交失败",
+    "cancelled": "已取消",
+    "timed_out": "已超时",
+    "skipped": "已跳过",
+    "action_required": "需要处理",
+}
 VALID_ARTIFACT_SUFFIXES = (
     ".exe",
     ".msi",
@@ -72,6 +90,63 @@ VALID_ARTIFACT_SUFFIXES = (
     ".dmg",
     ".pkg.tar.zst",
 )
+
+
+def _waiting_status_label(status):
+    raw = (status or "").strip()
+    key = raw.lower()
+    if key in WAITING_STATUS_LABELS:
+        return WAITING_STATUS_LABELS[key]
+    if "start" in key:
+        return "正在启动构建"
+    return raw or "处理中"
+
+
+def _waiting_progress_percent(run, status=None):
+    """Estimate progress from status + elapsed time. Never claims 100% until done."""
+    status = (status or getattr(run, "status", "") or "").strip().lower()
+    if status == "success":
+        return 100
+    if status in FAILED_TERMINAL_RUN_STATUSES:
+        return 100
+
+    created = getattr(run, "created_at", None)
+    if created:
+        if timezone.is_naive(created):
+            created = timezone.make_aware(created, timezone.get_current_timezone())
+        elapsed = max((timezone.now() - created).total_seconds(), 0.0)
+    else:
+        elapsed = 0.0
+    # Asymptotic time factor so long builds keep creeping without hitting the cap.
+    time_factor = 1.0 - math.exp(-elapsed / float(EXPECTED_BUILD_SECONDS))
+
+    if status in {"", "queued", "starting"} or "start" in status:
+        low, high = 4, 18
+    elif status == ARTIFACT_PENDING_STATUS:
+        low, high = 82, 96
+    elif status == "in_progress":
+        low, high = 18, 80
+    else:
+        low, high = 12, 70
+    return int(round(low + (high - low) * time_factor))
+
+
+def _waiting_page_context(run, *, filename, platform, log_url, status=None):
+    current = status if status is not None else (run.status or "")
+    created = getattr(run, "created_at", None)
+    created_ms = int(created.timestamp() * 1000) if created else 0
+    return {
+        "filename": filename,
+        "uuid": str(run.uuid),
+        "status": current,
+        "status_label": _waiting_status_label(current),
+        "progress_percent": _waiting_progress_percent(run, current),
+        "created_at_ms": created_ms,
+        "platform": platform,
+        "log_url": log_url,
+        "download_access": run.download_access,
+        "download_ttl_hours": run.download_ttl_hours,
+    }
 
 
 def _default_api_server(server):
@@ -506,6 +581,23 @@ def generator_view(request):
             copyIdPasswordButton = form.cleaned_data['copyIdPasswordButton'] and platform in flutter_desktop_platforms and linuxCustomAllowed
             manualTemporaryPassword = form.cleaned_data['manualTemporaryPassword'] and platform in flutter_desktop_platforms and linuxCustomAllowed
             showStartOnBootCheckbox = form.cleaned_data['showStartOnBootCheckbox'] and platform == 'windows'
+            defaultStartOnBoot = (
+                form.cleaned_data.get('defaultStartOnBoot')
+                and platform in flutter_desktop_platforms
+                and linuxCustomAllowed
+            )
+            if defaultStartOnBoot and platform == 'windows':
+                showStartOnBootCheckbox = True
+            sloganText = (form.cleaned_data.get('sloganText') or '').strip()
+            macosBundleId = (form.cleaned_data.get('macosBundleId') or '').strip()
+            defaultImageQuality = (form.cleaned_data.get('defaultImageQuality') or '').strip()
+            defaultCodec = (form.cleaned_data.get('defaultCodec') or '').strip()
+            preferWebsocket = bool(form.cleaned_data.get('preferWebsocket')) and linuxCustomAllowed
+            sessionIdleMinutes = form.cleaned_data.get('sessionIdleMinutes')
+            allowIdPrefixes = (form.cleaned_data.get('allowIdPrefixes') or '').strip()
+            msiDesktopShortcut = form.cleaned_data.get('msiDesktopShortcut') or 'default'
+            msiStartMenuShortcut = form.cleaned_data.get('msiStartMenuShortcut') or 'default'
+            msiInstallPrinter = form.cleaned_data.get('msiInstallPrinter') or 'off'
             incomingCompactMode = (
                 form.cleaned_data['incomingCompactMode']
                 and direction == 'incoming'
@@ -714,6 +806,28 @@ def generator_view(request):
             if hideTray:
                 decodedCustom['override-settings']['hide-tray'] = 'Y'
 
+            if defaultStartOnBoot:
+                decodedCustom['override-settings']['start-on-boot'] = 'Y'
+            if defaultImageQuality:
+                decodedCustom['override-settings']['image-quality'] = defaultImageQuality
+            if defaultCodec:
+                decodedCustom['override-settings']['codec-preference'] = defaultCodec
+            if preferWebsocket and not smartMultiRelay:
+                decodedCustom['override-settings']['allow-websocket'] = 'Y'
+            if sessionIdleMinutes:
+                decodedCustom['allow-auto-disconnect'] = 'Y'
+                decodedCustom['override-settings']['auto-disconnect-timeout'] = str(
+                    int(sessionIdleMinutes) * 60
+                )
+            if allowIdPrefixes:
+                prefixes = [
+                    part.strip()
+                    for part in allowIdPrefixes.replace('，', ',').split(',')
+                    if part.strip()
+                ]
+                if prefixes:
+                    decodedCustom['override-settings']['whitelist'] = ','.join(prefixes)
+
             hidecm_settings = (
                 'approve-mode',
                 'verification-method',
@@ -824,6 +938,12 @@ def generator_view(request):
                 "copyIdPasswordButton": 'true' if copyIdPasswordButton else 'false',
                 "manualTemporaryPassword": 'true' if manualTemporaryPassword else 'false',
                 "showStartOnBootCheckbox": 'true' if showStartOnBootCheckbox else 'false',
+                "defaultStartOnBoot": 'true' if defaultStartOnBoot else 'false',
+                "sloganText": sloganText,
+                "macosBundleId": macosBundleId,
+                "msiDesktopShortcut": msiDesktopShortcut,
+                "msiStartMenuShortcut": msiStartMenuShortcut,
+                "msiInstallPrinter": msiInstallPrinter,
                 "incomingCompactMode": 'true' if incomingCompactMode else 'false',
                 "incomingContentWidth": str(incomingContentWidth),
                 "incomingContentHeight": str(incomingContentHeight),
@@ -882,11 +1002,11 @@ def generator_view(request):
                 "return_run_details": True
             } 
             #print(data)
+            from .github_auth import github_auth_headers
+
             headers = {
-                'Accept':  'application/vnd.github+json',
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer '+_settings.GHBEARER,
-                'X-GitHub-Api-Version': '2026-03-10'
+                **github_auth_headers(),
+                "Content-Type": "application/json",
             }
             download_access = form.cleaned_data.get("download_access") or "login"
             download_ttl_hours = min(
@@ -898,6 +1018,91 @@ def generator_view(request):
                 ARTIFACT_PENDING_STATUS
                 if platform == "windows"
                 else "in_progress"
+            )
+            config_snapshot = build_config_snapshot(
+                form_data=form.cleaned_data,
+                decoded_custom=decodedCustom,
+                effective={
+                    "platform": platform,
+                    "version": version,
+                    "appname": appname,
+                    "filename": filename,
+                    "compname": compname,
+                    "androidappid": androidappid,
+                    "direction": direction,
+                    "installation": installation,
+                    "settings": settings,
+                    "server": server,
+                    "relayServer": relayServer,
+                    "apiServer": apiServer,
+                    "key": key,
+                    "smartMultiRelay": smartMultiRelay,
+                    "beijingCustom": beijingCustom,
+                    "urlLink": urlLink,
+                    "downloadLink": downloadLink,
+                    "hasIcon": iconlink_file not in (None, "", "false"),
+                    "hasLogo": logolink_file not in (None, "", "false"),
+                    "hasPrivacyImage": privacylink_file not in (None, "", "false"),
+                    "permPass": permPass,
+                    "passApproveMode": passApproveMode,
+                    "hidecm": hidecm,
+                    "hidecmDefaultEnabled": hidecmDefaultEnabled,
+                    "silentAgentMode": silentAgentMode,
+                    "denyLan": denyLan,
+                    "enableDirectIP": enableDirectIP,
+                    "theme": theme,
+                    "themeDorO": themeDorO,
+                    "defaultViewStyle": defaultViewStyle,
+                    "hideNetworkSetting": hideNetworkSetting,
+                    "hideSettingsMenu": hideSettingsMenu,
+                    "hideTray": hideTray,
+                    "removeSetupServerTip": removeSetupServerTip,
+                    "removeNewVersionNotif": removeNewVersionNotif,
+                    "removeRecentSessions": removeRecentSessions,
+                    "incomingCompactMode": incomingCompactMode,
+                    "incomingContentWidth": incomingContentWidth,
+                    "incomingContentHeight": incomingContentHeight,
+                    "copyIdPasswordButton": copyIdPasswordButton,
+                    "manualTemporaryPassword": manualTemporaryPassword,
+                    "showStartOnBootCheckbox": showStartOnBootCheckbox,
+                    "defaultStartOnBoot": defaultStartOnBoot,
+                    "sloganText": sloganText,
+                    "macosBundleId": macosBundleId,
+                    "defaultImageQuality": defaultImageQuality,
+                    "defaultCodec": defaultCodec,
+                    "preferWebsocket": preferWebsocket,
+                    "sessionIdleMinutes": sessionIdleMinutes,
+                    "allowIdPrefixes": allowIdPrefixes,
+                    "msiDesktopShortcut": msiDesktopShortcut,
+                    "msiStartMenuShortcut": msiStartMenuShortcut,
+                    "msiInstallPrinter": msiInstallPrinter,
+                    "permissionsDorO": permissionsDorO,
+                    "permissionsType": permissionsType,
+                    "enableKeyboard": enableKeyboard,
+                    "enableClipboard": enableClipboard,
+                    "enableFileCopyPaste": enableFileCopyPaste,
+                    "enableFileTransfer": enableFileTransfer,
+                    "forceDisableFileTransfer": forceDisableFileTransfer,
+                    "enableAudio": enableAudio,
+                    "enableTCP": enableTCP,
+                    "enableRemoteRestart": enableRemoteRestart,
+                    "enableRecording": enableRecording,
+                    "enableBlockingInput": enableBlockingInput,
+                    "enableRemoteModi": enableRemoteModi,
+                    "enablePrinter": enablePrinter,
+                    "enableCamera": enableCamera,
+                    "enableTerminal": enableTerminal,
+                    "removeWallpaper": removeWallpaper,
+                    "autoClose": autoClose,
+                    "delayFix": delayFix,
+                    "cycleMonitor": cycleMonitor,
+                    "xOffline": xOffline,
+                    "silentInstallOnDoubleClick": silentInstallOnDoubleClick,
+                    "selfhosted": selfhosted,
+                    "linuxCustomAllowed": linuxCustomAllowed,
+                    "download_access": download_access,
+                    "download_ttl_hours": download_ttl_hours,
+                },
             )
             try:
                 new_github_run = create_github_run_with_reservation(
@@ -911,6 +1116,7 @@ def generator_view(request):
                     download_access=download_access,
                     download_ttl_hours=download_ttl_hours,
                     download_token_hash=_callback_token_hash(download_token),
+                    config_snapshot=config_snapshot,
                 )
             except GenerationQuotaExceeded:
                 # The form has already been normalized and temporary files
@@ -940,16 +1146,17 @@ def generator_view(request):
                         ).update(github_run_id=workflow_run_id)
 
                     log_url = github_data.get('html_url') or f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}/actions"
-                    return render(request, 'waiting.html', {
-                        'filename': filename,
-                        'uuid': myuuid,
-                        'status': "Starting generator...please wait",
-                        'platform': platform,
-                        'log_url': log_url,
-                        'download_access': download_access,
-                        'download_ttl_hours': download_ttl_hours,
-                        'download_token': download_token,
-                    })
+                    return render(
+                        request,
+                        "waiting.html",
+                        _waiting_page_context(
+                            new_github_run,
+                            filename=filename,
+                            platform=platform,
+                            log_url=log_url,
+                            status=new_github_run.status or "queued",
+                        ),
+                    )
                 else:
                     transitioned = GithubRun.objects.filter(
                         pk=new_github_run.pk,
@@ -984,10 +1191,9 @@ def check_for_file(request):
         github_log_url = f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}/actions"
 
     if gh_run.github_run_id and current_status not in TERMINAL_RUN_STATUSES:
-        headers = {
-            "Authorization": f"Bearer {_settings.GHBEARER}",
-            "Accept": "application/vnd.github+json"
-        }
+        from .github_auth import github_auth_headers
+
+        headers = github_auth_headers()
         api_url = f"https://api.github.com/repos/{_settings.GHUSER}/{_settings.REPONAME}/actions/runs/{gh_run.github_run_id}"
         
         try:
@@ -1023,34 +1229,67 @@ def check_for_file(request):
     
     if current_status == "success":
         files = list_generated_files(run_uuid)
-        return render(request, 'generated.html', {
-            'filename': filename, 
-            'uuid': run_uuid,
-            'platform': platform,
+        success_ctx = {
+            "filename": filename,
+            "uuid": run_uuid,
+            "platform": platform,
             **_delivery_context(gh_run, files),
-        })
-        
-    elif current_status in FAILED_TERMINAL_RUN_STATUSES:
+        }
+        if request.GET.get("format") == "json":
+            return JsonResponse(
+                {
+                    "state": "success",
+                    "status": current_status,
+                    "status_label": _waiting_status_label(current_status),
+                    "progress": 100,
+                    "redirect": f"/check_for_file?{urlencode({'filename': filename, 'uuid': run_uuid, 'platform': platform})}",
+                }
+            )
+        return render(request, "generated.html", success_ctx)
+
+    if current_status in FAILED_TERMINAL_RUN_STATUSES:
         files = list_generated_files(run_uuid)
-        return render(request, 'failure.html', {
-            'log_url': github_log_url, 
-            'filename': filename, 
-            'uuid': run_uuid,
-            'platform': platform,
-            'status': gh_run.status,
-            **_delivery_context(gh_run, files),
-        })
-        
-    else:
-        return render(request, 'waiting.html', {
-            'filename': filename, 
-            'uuid': run_uuid,
-            'status': gh_run.status, 
-            'platform': platform, 
-            'log_url': github_log_url,
-            'download_access': gh_run.download_access,
-            'download_ttl_hours': gh_run.download_ttl_hours,
-        })
+        if request.GET.get("format") == "json":
+            return JsonResponse(
+                {
+                    "state": "failed",
+                    "status": current_status,
+                    "status_label": _waiting_status_label(current_status),
+                    "progress": 100,
+                    "redirect": f"/check_for_file?{urlencode({'filename': filename, 'uuid': run_uuid, 'platform': platform})}",
+                }
+            )
+        return render(
+            request,
+            "failure.html",
+            {
+                "log_url": github_log_url,
+                "filename": filename,
+                "uuid": run_uuid,
+                "platform": platform,
+                "status": gh_run.status,
+                **_delivery_context(gh_run, files),
+            },
+        )
+
+    waiting_ctx = _waiting_page_context(
+        gh_run,
+        filename=filename,
+        platform=platform,
+        log_url=github_log_url,
+        status=gh_run.status,
+    )
+    if request.GET.get("format") == "json":
+        return JsonResponse(
+            {
+                "state": "waiting",
+                "status": waiting_ctx["status"],
+                "status_label": waiting_ctx["status_label"],
+                "progress": waiting_ctx["progress_percent"],
+                "created_at_ms": waiting_ctx["created_at_ms"],
+            }
+        )
+    return render(request, "waiting.html", waiting_ctx)
 
 @require_GET
 def download(request):
@@ -1102,6 +1341,17 @@ def download(request):
         content = file.read()
     if artifact and hashlib.sha256(content).hexdigest() != artifact.sha256:
         raise Http404("Generated file not found")
+    try:
+        from .ops import record_download_event
+
+        record_download_event(
+            run=run,
+            user=request.user,
+            filename=filename,
+            request=request,
+        )
+    except Exception:
+        pass
     content_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
     response = HttpResponse(content, headers={
         'Content-Type': content_type,
@@ -1162,6 +1412,15 @@ def update_github_run(request):
     run.refresh_from_db(fields=["status", "artifact_uploaded_at", "quota_reserved", "quota_counted"])
     if run.status in FAILED_TERMINAL_RUN_STATUSES and not run.artifact_uploaded_at:
         release_generation_reservation(run)
+        try:
+            from .wecom_notify import format_build_failure_alert, notify_wecom_if_enabled
+
+            notify_wecom_if_enabled(
+                "build_failure",
+                format_build_failure_alert(run=run),
+            )
+        except Exception:
+            pass
     return HttpResponse("")
 
 def resize_and_encode_icon(imagefile):
@@ -1230,11 +1489,11 @@ def startgh(request):
             "filename":data_.get('filename')
         }
     } 
+    from .github_auth import github_auth_headers
+
     headers = {
-        'Accept':  'application/vnd.github+json',
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer '+_settings.GHBEARER,
-        'X-GitHub-Api-Version': '2026-03-10'
+        **github_auth_headers(),
+        "Content-Type": "application/json",
     }
     response = requests.post(url, json=data, headers=headers)
     print(response)
@@ -1273,6 +1532,11 @@ def save_custom_client(request):
     myuuid = request.POST.get("uuid")
     if file is None or not myuuid:
         return HttpResponse("Missing file or UUID", status=400)
+    max_upload = int(getattr(_settings, "DATA_UPLOAD_MAX_MEMORY_SIZE", 0) or 0)
+    if max_upload > 0:
+        declared = int(getattr(file, "size", 0) or 0)
+        if declared > max_upload:
+            return HttpResponse("Upload too large", status=413)
     run, error = _machine_run(request, myuuid)
     if error:
         return error
@@ -1308,6 +1572,8 @@ def save_custom_client(request):
                 output_file.write(chunk)
                 digest.update(chunk)
                 size += len(chunk)
+                if max_upload > 0 and size > max_upload:
+                    return HttpResponse("Upload too large", status=413)
 
         if not size or not _valid_artifact_filename(filename, run.platform or None):
             return HttpResponse("File saved successfully!")
@@ -1369,6 +1635,8 @@ def save_custom_client(request):
                 GithubRun.objects.filter(pk=run.pk, status=run.status).update(
                     status=ARTIFACT_PENDING_STATUS if defer_completion else "success"
                 )
+                if not defer_completion:
+                    maybe_notify_build_success(run.pk)
         return HttpResponse("File saved successfully!")
     finally:
         if temp_path is not None:
@@ -1446,7 +1714,218 @@ def finalize_custom_client(request):
         status="success",
         artifact_file_count__lt=artifact_file_count,
     ).update(artifact_file_count=artifact_file_count)
+    maybe_notify_build_success(run.pk)
     return JsonResponse({"status": "success", "files": expected_files})
+
+
+def _commit_downloaded_artifact(run, filename, file_path, size, content_hash, *, defer_completion):
+    """Register a local artifact file that already matches size/sha256."""
+    output_root = (Path("exe") / run.uuid).resolve()
+    file_save_path = (output_root / filename).resolve()
+    try:
+        file_save_path.relative_to(output_root)
+    except ValueError:
+        return HttpResponse("Invalid artifact path", status=400)
+
+    with transaction.atomic():
+        claimed = GithubRun.objects.filter(pk=run.pk).exclude(
+            status__in=FAILED_TERMINAL_RUN_STATUSES,
+        ).update(status=models.F("status"))
+        if not claimed:
+            return HttpResponse("Run no longer accepts artifacts", status=409)
+
+        run = GithubRun.objects.get(pk=run.pk)
+        expected_windows_files = _windows_artifact_names(run)
+        if run.platform == "windows" and not expected_windows_files:
+            return HttpResponse("Artifact contract is invalid", status=409)
+        if expected_windows_files and filename not in expected_windows_files:
+            return HttpResponse("Artifact does not match this run", status=409)
+
+        existing = GeneratedArtifact.objects.filter(run=run, filename=filename).first()
+        if existing:
+            if existing.size != size or existing.sha256 != content_hash:
+                return HttpResponse("Artifact content does not match", status=409)
+            if file_path.resolve() != file_save_path:
+                os.replace(file_path, file_save_path)
+            return None
+
+        if expected_windows_files and run.status == "success":
+            return HttpResponse("Finalized artifacts are immutable", status=409)
+
+        if file_path.resolve() != file_save_path:
+            os.replace(file_path, file_save_path)
+        GeneratedArtifact.objects.create(
+            run=run,
+            filename=filename,
+            size=size,
+            sha256=content_hash,
+        )
+        artifact_file_count = GeneratedArtifact.objects.filter(run=run).count()
+        mark_artifact_uploaded(run, artifact_file_count=artifact_file_count)
+        if run.platform == "windows":
+            GithubRun.objects.filter(pk=run.pk).exclude(
+                status__in=TERMINAL_RUN_STATUSES,
+            ).update(status=ARTIFACT_PENDING_STATUS)
+        elif (
+            run.status not in TERMINAL_RUN_STATUSES
+            and run.status != ARTIFACT_PENDING_STATUS
+        ):
+            GithubRun.objects.filter(pk=run.pk, status=run.status).update(
+                status=ARTIFACT_PENDING_STATUS if defer_completion else "success"
+            )
+            if not defer_completion:
+                maybe_notify_build_success(run.pk)
+    return None
+
+
+@csrf_exempt
+@require_POST
+def prepare_artifact_upload(request):
+    """Issue object-storage PUT URLs when COS/OSS is enabled; else ask for direct upload."""
+    try:
+        data = json.loads(request.body or b"{}")
+    except (TypeError, ValueError):
+        return HttpResponse("Invalid JSON", status=400)
+
+    run, error = _machine_run(request, data.get("uuid"))
+    if error:
+        return error
+    if run.status in FAILED_TERMINAL_RUN_STATUSES:
+        return HttpResponse("Run no longer accepts artifacts", status=409)
+
+    files = data.get("files") or []
+    if not isinstance(files, list) or not files:
+        return HttpResponse("Missing files", status=400)
+
+    from .object_storage import (
+        ObjectStorageError,
+        artifact_object_key,
+        create_presigned_put_url,
+        get_active_object_storage,
+    )
+
+    provider, config = get_active_object_storage()
+    if not provider or config is None:
+        return JsonResponse({"mode": "direct", "provider": None, "uploads": []})
+
+    uploads = []
+    try:
+        for raw_name in files:
+            filename = _safe_output_filename(str(raw_name or ""))
+            if not filename or not _valid_artifact_filename(filename, run.platform or None):
+                return HttpResponse(f"Invalid filename: {raw_name}", status=400)
+            object_key = artifact_object_key(config, run.uuid, filename)
+            signed = create_presigned_put_url(provider, config, object_key)
+            uploads.append(
+                {
+                    "filename": filename,
+                    "object_key": object_key,
+                    "put_url": signed["put_url"],
+                    "headers": signed.get("headers") or {},
+                }
+            )
+    except ObjectStorageError as exc:
+        return JsonResponse({"error": str(exc), "mode": "direct"}, status=503)
+
+    return JsonResponse(
+        {
+            "mode": "object_storage",
+            "provider": provider,
+            "uploads": uploads,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def complete_artifact_upload(request):
+    """Pull uploaded objects from COS/OSS into local exe/ and create receipts."""
+    try:
+        data = json.loads(request.body or b"{}")
+    except (TypeError, ValueError):
+        return HttpResponse("Invalid JSON", status=400)
+
+    run, error = _machine_run(request, data.get("uuid"))
+    if error:
+        return error
+    if run.status in FAILED_TERMINAL_RUN_STATUSES:
+        return HttpResponse("Run no longer accepts artifacts", status=409)
+
+    defer_completion = str(data.get("defer_completion", "true")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    artifacts = data.get("artifacts") or []
+    if not isinstance(artifacts, list) or not artifacts:
+        return HttpResponse("Missing artifacts", status=400)
+
+    from .object_storage import (
+        ObjectStorageError,
+        delete_object,
+        download_object_to_path,
+        get_active_object_storage,
+    )
+
+    provider, config = get_active_object_storage()
+    if not provider or config is None:
+        return HttpResponse("Object storage is not configured", status=409)
+
+    output_root = (Path("exe") / run.uuid).resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    imported = []
+
+    for item in artifacts:
+        if not isinstance(item, dict):
+            return HttpResponse("Invalid artifact entry", status=400)
+        filename = _safe_output_filename(str(item.get("filename") or ""))
+        object_key = str(item.get("object_key") or "").strip()
+        expected_size = int(item.get("size") or 0)
+        expected_sha = str(item.get("sha256") or "").strip().lower()
+        if not filename or not object_key:
+            return HttpResponse("Missing filename or object_key", status=400)
+        if not object_key.startswith(f"{config.normalized_prefix}/{run.uuid}/"):
+            return HttpResponse("object_key does not belong to this run", status=400)
+
+        dest = (output_root / filename).resolve()
+        try:
+            dest.relative_to(output_root)
+        except ValueError:
+            return HttpResponse("Invalid artifact path", status=400)
+
+        try:
+            size, content_hash = download_object_to_path(provider, config, object_key, dest)
+        except ObjectStorageError as exc:
+            return HttpResponse(str(exc), status=502)
+
+        if expected_size and size != expected_size:
+            dest.unlink(missing_ok=True)
+            return HttpResponse("Downloaded size mismatch", status=409)
+        if expected_sha and content_hash != expected_sha:
+            dest.unlink(missing_ok=True)
+            return HttpResponse("Downloaded checksum mismatch", status=409)
+
+        err = _commit_downloaded_artifact(
+            run,
+            filename,
+            dest,
+            size,
+            content_hash,
+            defer_completion=defer_completion,
+        )
+        if err is not None:
+            return err
+        imported.append({"filename": filename, "size": size, "sha256": content_hash})
+        delete_object(provider, config, object_key)
+
+    return JsonResponse(
+        {
+            "status": "ok",
+            "provider": provider,
+            "imported": imported,
+        }
+    )
+
 
 @csrf_exempt
 @require_POST

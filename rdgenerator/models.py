@@ -38,6 +38,7 @@ class UserEntitlement(models.Model):
     generation_limit = models.PositiveIntegerField(null=True, blank=True)
     generations_used = models.PositiveIntegerField(default=0)
     reserved_generations = models.PositiveIntegerField(default=0)
+    disable_reason = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -147,6 +148,12 @@ class ActivationCode(models.Model):
     code_hint = models.CharField(max_length=4, editable=False)
     plan = models.CharField(max_length=12, choices=PLAN_CHOICES, db_index=True)
     batch_label = models.CharField(max_length=80, blank=True, default="")
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="未使用激活码的过期时间；到期后自动作废。",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -183,6 +190,8 @@ class ActivationCode(models.Model):
             return "redeemed"
         if self.revoked_at:
             return "revoked"
+        if self.expires_at and timezone.now() >= self.expires_at:
+            return "expired"
         return "unused"
 
     @property
@@ -190,6 +199,7 @@ class ActivationCode(models.Model):
         return {
             "redeemed": "已使用",
             "revoked": "已作废",
+            "expired": "已过期",
             "unused": "未使用",
         }[self.status]
 
@@ -348,6 +358,10 @@ class GithubRun(models.Model):
     quota_chargeable = models.BooleanField(default=False)
     quota_reserved = models.BooleanField(default=False)
     quota_counted = models.BooleanField(default=False)
+    success_email_sent_at = models.DateTimeField(null=True, blank=True)
+    config_snapshot = models.JSONField(null=True, blank=True, default=None)
+    failure_summary = models.TextField(blank=True, default="")
+    failure_summary_at = models.DateTimeField(null=True, blank=True)
 
 
 class GeneratedArtifact(models.Model):
@@ -381,3 +395,350 @@ def create_github_run_with_reservation(user, **run_fields):
             quota_reserved=quota_reserved,
             **run_fields,
         )
+
+
+class SiteEmailConfig(models.Model):
+    """Singleton SMTP settings editable by superusers in the web UI."""
+
+    host = models.CharField("SMTP 服务器", max_length=255, blank=True, default="smtp.qq.com")
+    port = models.PositiveIntegerField("端口", default=465)
+    username = models.CharField("发信账号", max_length=255, blank=True, default="")
+    password = models.CharField("授权码/密码", max_length=255, blank=True, default="")
+    use_ssl = models.BooleanField("使用 SSL", default=True)
+    use_tls = models.BooleanField("使用 TLS", default=False)
+    from_email = models.EmailField("发件人地址", blank=True, default="")
+    enabled = models.BooleanField("启用邮件发送", default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "站点邮件配置"
+        verbose_name_plural = "站点邮件配置"
+
+    def __str__(self):
+        return f"SiteEmailConfig<{self.host}:{self.port}>"
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    @property
+    def is_configured(self):
+        return bool(
+            self.enabled
+            and self.host
+            and self.port
+            and self.username
+            and self.password
+            and (self.from_email or self.username)
+        )
+
+    @property
+    def effective_from_email(self):
+        return (self.from_email or self.username or "").strip()
+
+
+class SiteWecomConfig(models.Model):
+    """Singleton WeCom group-robot webhook for admin-console alerts."""
+
+    enabled = models.BooleanField("启用企业微信通知", default=False)
+    webhook_url = models.URLField("机器人 Webhook 地址", blank=True, default="", max_length=500)
+    notify_remote_login = models.BooleanField("异地登录提醒", default=True)
+    notify_admin_login = models.BooleanField("超管登录成功提醒", default=False)
+    notify_build_failure = models.BooleanField("构建失败提醒", default=True)
+    notify_build_success = models.BooleanField("构建成功提醒", default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "企业微信通知配置"
+        verbose_name_plural = "企业微信通知配置"
+
+    def __str__(self):
+        return f"SiteWecomConfig<enabled={self.enabled}>"
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    @property
+    def is_configured(self):
+        url = (self.webhook_url or "").strip()
+        return bool(
+            self.enabled
+            and url.startswith("https://")
+            and "qyapi.weixin.qq.com" in url
+        )
+
+
+class SiteTencentCosConfig(models.Model):
+    """Singleton Tencent COS settings (independent from Aliyun OSS)."""
+
+    enabled = models.BooleanField("启用腾讯云 COS", default=False)
+    key_prefix = models.CharField(
+        "对象前缀",
+        max_length=128,
+        blank=True,
+        default="rdgen",
+        help_text="例如 rdgen → rdgen/{uuid}/filename.exe",
+    )
+    secret_id = models.CharField("SecretId", max_length=255, blank=True, default="")
+    secret_key = models.CharField("SecretKey", max_length=255, blank=True, default="")
+    region = models.CharField(
+        "地域",
+        max_length=64,
+        blank=True,
+        default="ap-guangzhou",
+        help_text="例如 ap-guangzhou / ap-shanghai",
+    )
+    bucket = models.CharField(
+        "桶名",
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="完整桶名，含 APPID，例如 rdgen-artifacts-125xxxxxxx",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "腾讯云 COS 配置"
+        verbose_name_plural = "腾讯云 COS 配置"
+
+    def __str__(self):
+        return f"SiteTencentCosConfig<enabled={self.enabled}>"
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    @property
+    def normalized_prefix(self):
+        return (self.key_prefix or "rdgen").strip().strip("/")
+
+    @property
+    def is_ready(self):
+        return bool(
+            (self.secret_id or "").strip()
+            and (self.secret_key or "").strip()
+            and (self.region or "").strip()
+            and (self.bucket or "").strip()
+        )
+
+    @property
+    def is_configured(self):
+        return bool(self.enabled and self.is_ready)
+
+    @property
+    def status_label(self):
+        if not self.enabled:
+            return "已关闭"
+        return "可用" if self.is_ready else "未完成（凭证不齐）"
+
+
+class SiteAliyunOssConfig(models.Model):
+    """Singleton Aliyun OSS settings (independent from Tencent COS)."""
+
+    enabled = models.BooleanField("启用阿里云 OSS", default=False)
+    key_prefix = models.CharField(
+        "对象前缀",
+        max_length=128,
+        blank=True,
+        default="rdgen",
+        help_text="例如 rdgen → rdgen/{uuid}/filename.exe",
+    )
+    access_key_id = models.CharField("AccessKeyId", max_length=255, blank=True, default="")
+    access_key_secret = models.CharField(
+        "AccessKeySecret", max_length=255, blank=True, default=""
+    )
+    endpoint = models.CharField(
+        "Endpoint",
+        max_length=255,
+        blank=True,
+        default="https://oss-cn-hangzhou.aliyuncs.com",
+        help_text="例如 https://oss-cn-hangzhou.aliyuncs.com",
+    )
+    bucket = models.CharField("桶名", max_length=255, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "阿里云 OSS 配置"
+        verbose_name_plural = "阿里云 OSS 配置"
+
+    def __str__(self):
+        return f"SiteAliyunOssConfig<enabled={self.enabled}>"
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    @property
+    def normalized_prefix(self):
+        return (self.key_prefix or "rdgen").strip().strip("/")
+
+    @property
+    def is_ready(self):
+        return bool(
+            (self.access_key_id or "").strip()
+            and (self.access_key_secret or "").strip()
+            and (self.endpoint or "").strip()
+            and (self.bucket or "").strip()
+        )
+
+    @property
+    def is_configured(self):
+        return bool(self.enabled and self.is_ready)
+
+    @property
+    def status_label(self):
+        if not self.enabled:
+            return "已关闭"
+        return "可用" if self.is_ready else "未完成（凭证不齐）"
+
+
+class SiteOpsConfig(models.Model):
+    """Singleton site operations toggles (maintenance / announcement)."""
+
+    maintenance_enabled = models.BooleanField("维护模式", default=False)
+    maintenance_message = models.TextField(
+        "维护提示",
+        blank=True,
+        default="生成器正在维护中，请稍后再试。",
+    )
+    announcement = models.TextField("前台公告", blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "站点运维配置"
+        verbose_name_plural = "站点运维配置"
+
+    def __str__(self):
+        return f"SiteOpsConfig<maintenance={self.maintenance_enabled}>"
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+
+class EmailDeliveryLog(models.Model):
+    KIND_REGISTRATION = "registration"
+    KIND_BUILD_SUCCESS = "build_success"
+    KIND_TEST = "test"
+    KIND_EXPIRY_REMINDER = "expiry_reminder"
+    KIND_LOGIN_ALERT = "login_alert"
+    KIND_CHOICES = (
+        (KIND_REGISTRATION, "注册验证码"),
+        (KIND_BUILD_SUCCESS, "构建成功通知"),
+        (KIND_TEST, "SMTP 测试"),
+        (KIND_EXPIRY_REMINDER, "会员到期提醒"),
+        (KIND_LOGIN_ALERT, "异地登录提醒"),
+    )
+
+    kind = models.CharField(max_length=32, choices=KIND_CHOICES, db_index=True)
+    to_email = models.EmailField(db_index=True)
+    success = models.BooleanField(default=False, db_index=True)
+    error_message = models.CharField(max_length=500, blank=True, default="")
+    subject = models.CharField(max_length=255, blank=True, default="")
+    related_run = models.ForeignKey(
+        GithubRun,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="email_logs",
+    )
+    related_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="email_delivery_logs",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        verbose_name = "邮件投递日志"
+        verbose_name_plural = "邮件投递日志"
+
+    def __str__(self):
+        state = "成功" if self.success else "失败"
+        return f"{self.get_kind_display()} · {self.to_email} · {state}"
+
+
+class DownloadEvent(models.Model):
+    run = models.ForeignKey(
+        GithubRun,
+        on_delete=models.CASCADE,
+        related_name="download_events",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="download_events",
+    )
+    filename = models.CharField(max_length=255)
+    ip_address = models.GenericIPAddressField(null=True, blank=True, db_index=True)
+    user_agent = models.CharField(max_length=500, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        verbose_name = "下载审计"
+        verbose_name_plural = "下载审计"
+        indexes = [
+            models.Index(fields=("run", "created_at"), name="rdgen_dl_run_created_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.filename} · {self.created_at}"
+
+
+class AdminAuditLog(models.Model):
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="admin_audit_logs",
+    )
+    action = models.CharField(max_length=64, db_index=True)
+    target_type = models.CharField(max_length=64, blank=True, default="")
+    target_id = models.CharField(max_length=64, blank=True, default="")
+    detail = models.JSONField(null=True, blank=True, default=None)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        verbose_name = "超管操作审计"
+        verbose_name_plural = "超管操作审计"
+
+    def __str__(self):
+        actor = getattr(self.actor, "username", None) or "系统"
+        return f"{actor} · {self.action} · {self.created_at}"
+
+
+class LoginEvent(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="login_events",
+    )
+    success = models.BooleanField(default=True)
+    is_admin = models.BooleanField(default=False, db_index=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True, db_index=True)
+    user_agent = models.CharField(max_length=500, blank=True, default="")
+    remote_alert_sent = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        verbose_name = "登录事件"
+        verbose_name_plural = "登录事件"
+
+    def __str__(self):
+        return f"{self.user_id} · {self.ip_address} · {self.created_at}"

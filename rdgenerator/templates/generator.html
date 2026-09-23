@@ -554,13 +554,18 @@
             width: 36px;
             height: 36px;
             place-items: center;
-            border: 1px solid rgba(255,255,255,.16);
+            overflow: hidden;
+            border: 0;
             border-radius: 8px;
-            background: #315fcf;
-            color: #fff;
+            background: transparent;
             box-shadow: 0 6px 16px rgba(0,0,0,.24);
-            font-family: 'DM Mono', monospace;
-            font-size: 12px;
+            padding: 0;
+            line-height: 0;
+        }
+        .workspace-page .brand-mark svg {
+            display: block;
+            width: 100%;
+            height: 100%;
         }
         .workspace-page .brand-copy { display: flex; flex-direction: column; gap: 1px; }
         .workspace-page .brand-copy small { color: #8e949f; font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: uppercase; }
@@ -681,7 +686,9 @@
         .workspace-page .builder-nav__links i { color: #8b929d; }
         .workspace-page .builder-nav__links a:hover i,
         .workspace-page .builder-nav__links a[aria-current="location"] i { color: var(--ui-accent); }
-        .workspace-page .builder-nav__tools { display: flex; flex: 0 0 auto; gap: 6px; margin-left: auto; }
+        .workspace-page .builder-nav__tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .workspace-page .preset-bar { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-right: 4px; }
+ display: flex; flex: 0 0 auto; gap: 6px; margin-left: auto; }
         .workspace-page .builder-nav__tools button {
             display: inline-flex;
             align-items: center;
@@ -926,6 +933,7 @@
             {% for message in messages %}<li class="workspace-message {{ message.tags }}">{{ message }}</li>{% endfor %}
         </ul>
     {% endif %}
+    {% include "includes/site_announcement_modal.html" %}
     <form id="myForm" action="/generator" method="post" enctype="multipart/form-data">
         {% csrf_token %}
         {{ form.formSchemaVersion }}
@@ -954,6 +962,11 @@
                     <a href="#build-delivery" data-section-link><i class="fas fa-share-nodes" aria-hidden="true"></i> 交付</a>
                 </div>
                 <div class="builder-nav__tools">
+                    <div class="preset-bar" aria-label="配置模板">
+                        <button type="button" class="button button--secondary button--small" onclick="applyBuildPreset('agent')">被控版</button>
+                        <button type="button" class="button button--secondary button--small" onclick="applyBuildPreset('support')">客服版</button>
+                        <button type="button" class="button button--secondary button--small" onclick="applyBuildPreset('full')">全功能版</button>
+                    </div>
                     <button type="button" onclick="saveFormData()" title="保存配置" aria-label="保存配置"><i class="fas fa-download" aria-hidden="true"></i><span>保存</span></button>
                     <input type="file" id="fileInput" class="visually-hidden" accept=".json">
                     <button type="button" onclick="loadFormData()" title="导入配置" aria-label="导入配置"><i class="fas fa-upload" aria-hidden="true"></i><span>导入</span></button>
@@ -1052,27 +1065,29 @@
 
                             <div class="section linux-custom-content">
                                 <h3 class="section-subtitle"><i class="fas fa-server" aria-hidden="true"></i> 自定义服务器</h3>
+                                <p class="help-text" style="margin:0 0 12px;">对应官方客户端「设置 → 网络」里的 ID / 密钥 / API。说明见 <a href="https://rustdesk.com/docs/zh-cn/self-host/client-configuration/" target="_blank" rel="noopener">客户端配置文档</a>。</p>
                                 <div class="field-grid">
                                     <div class="field-block">
-                                        <label for="{{ form.serverIP.id_for_label }}">ID 服务器</label>
+                                        <label for="{{ form.serverIP.id_for_label }}">ID 服务器（hbbs）</label>
                                         {{ form.serverIP }}
-                                        <span class="help-text">填写 hbbs 地址，可包含端口。</span>
+                                        <span class="help-text">填 <code>hbbs</code> 的主机名或 IP，两端客户端都要指向同一台。例：<code>hbbs.example.com</code> 或 <code>hbbs.example.com:21116</code>。默认端口 21116，可省略。</span>
                                     </div>
                                     <div class="field-block">
-                                        <label for="{{ form.key.id_for_label }}">服务器密钥</label>
+                                        <label for="{{ form.key.id_for_label }}">密钥（公钥 Key）</label>
                                         {{ form.key }}
+                                        <span class="help-text">加密连接用的<strong>公钥</strong>，不是 Pro 许可证。在服务器数据目录的 <code>id_ed25519.pub</code>；Pro 也可在 Web 控制台复制。</span>
                                     </div>
                                     <div class="field-block field-block--full">
-                                        <label for="{{ form.apiServer.id_for_label }}">API 地址</label>
+                                        <label for="{{ form.apiServer.id_for_label }}">API 服务器</label>
                                         {{ form.apiServer }}
-                                        <span class="help-text">留空时按 ID 服务器的主机名自动使用 21114 端口。</span>
+                                        <span class="help-text">仅 Pro 需要（客户端登录 / Web 控制台）。开源版可留空。默认端口 <code>21114</code>，例：<code>http://hbbs.example.com:21114</code>；若已用 HTTPS 反代到 443，填 <code>https://hbbs.example.com</code>。本页留空时，会按 ID 服务器主机名自动补成 <code>http://主机:21114</code>。</span>
                                     </div>
                                     <details id="relayServerOptions" class="advanced-server-options field-block field-block--full"{% if form.relayServer.value or form.relayServer.errors %} open{% endif %}>
-                                        <summary>高级：固定中继服务器</summary>
+                                        <summary>高级：固定中继服务器（hbbr）</summary>
                                         <div class="advanced-server-options__content">
                                             <label for="{{ form.relayServer.id_for_label }}">固定中继服务器</label>
                                             {{ form.relayServer }}
-                                            <span class="help-text">通常留空，由 ID 服务器选择健康中继；填写后将强制使用单个 hbbr，不能填写逗号分隔的列表。</span>
+                                            <span class="help-text">通常留空，由 ID 服务器（hbbs）自动选择健康的 <code>hbbr</code>（默认端口 21117）。仅在要强制指定单台中继时填写一个地址，不能写逗号分隔列表。</span>
                                         </div>
                                     </details>
                                     <div class="field-block field-block--full">
@@ -1089,6 +1104,16 @@
                                         <label for="{{ form.compname.id_for_label }}">版权公司名称</label>
                                         {{ form.compname }}
                                     </div>
+                                    <div class="field-block field-block--full">
+                                        <label for="{{ form.sloganText.id_for_label }}">关于页 Slogan</label>
+                                        {{ form.sloganText }}
+                                        <span class="help-text">替换关于页口号，去掉 RustDesk 痕迹。留空则用「Powered by 应用名」。</span>
+                                    </div>
+                                    <div class="field-block field-block--full macos-only-field" id="macosBundleIdBlock" hidden>
+                                        <label for="{{ form.macosBundleId.id_for_label }}">macOS Bundle ID</label>
+                                        {{ form.macosBundleId }}
+                                        <span class="help-text">例 <code>com.company.client</code>。留空自动 <code>com.rdgen.{配置名}</code>。</span>
+                                    </div>
                                 </div>
                             </div>
                             <div id="desktopBehaviorSection" class="section section--full desktop-behavior-section linux-custom-content">
@@ -1103,7 +1128,7 @@
                                             {{ form.removeSetupServerTip }} 隐藏底部“自建服务器”提示
                                         </label>
                                         <label id="hideNetworkSettingOption" class="desktop-behavior-toggle" for="{{ form.hideNetworkSetting.id_for_label }}">
-                                            {{ form.hideNetworkSetting }} 隐藏设置里的“网络”入口
+                                            {{ form.hideNetworkSetting }} 锁定网络设置（隐藏「网络」入口，用户无法改服务器）
                                         </label>
                                         <label id="silentInstallOption" class="desktop-behavior-toggle" for="{{ form.silentInstallOnDoubleClick.id_for_label }}">
                                             {{ form.silentInstallOnDoubleClick }} Windows 安装包双击后静默安装
@@ -1122,6 +1147,9 @@
                                         </label>
                                         <label id="startOnBootOption" class="desktop-behavior-toggle" for="{{ form.showStartOnBootCheckbox.id_for_label }}">
                                             {{ form.showStartOnBootCheckbox }} 显示开机自启选项
+                                        </label>
+                                        <label id="defaultStartOnBootOption" class="desktop-behavior-toggle" for="{{ form.defaultStartOnBoot.id_for_label }}">
+                                            {{ form.defaultStartOnBoot }} 默认开启开机自启
                                         </label>
                                     </div>
                                     <div id="incomingCompactWrapper" class="desktop-behavior-compact-field">
@@ -1293,6 +1321,50 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </section>
+
+                <section id="build-enterprise" class="builder-section linux-custom-content">
+                    <header class="builder-section__header">
+                        <span class="builder-section__index">05b</span>
+                        <h2>策略与安装默认</h2>
+                    </header>
+                    <div class="builder-section__content">
+                        <div class="field-grid">
+                            <div class="field-block">
+                                <label for="{{ form.defaultImageQuality.id_for_label }}">默认画质</label>
+                                {{ form.defaultImageQuality }}
+                            </div>
+                            <div class="field-block">
+                                <label for="{{ form.defaultCodec.id_for_label }}">默认编码</label>
+                                {{ form.defaultCodec }}
+                            </div>
+                            <div class="field-block">
+                                <label for="{{ form.sessionIdleMinutes.id_for_label }}">会话空闲超时（分钟）</label>
+                                {{ form.sessionIdleMinutes }}
+                                <span class="help-text">写入自动断开超时；勾选「无操作自动关闭」时更稳妥。</span>
+                            </div>
+                            <div class="field-block">
+                                <label for="{{ form.allowIdPrefixes.id_for_label }}">仅允许连接的 ID 前缀</label>
+                                {{ form.allowIdPrefixes }}
+                            </div>
+                            <div class="field-block field-block--full">
+                                <label class="option-toggle" for="{{ form.preferWebsocket.id_for_label }}">{{ form.preferWebsocket }} 默认优先 WebSocket 中继</label>
+                            </div>
+                            <div class="field-block">
+                                <label for="{{ form.msiDesktopShortcut.id_for_label }}">安装向导·桌面图标</label>
+                                {{ form.msiDesktopShortcut }}
+                            </div>
+                            <div class="field-block">
+                                <label for="{{ form.msiStartMenuShortcut.id_for_label }}">安装向导·开始菜单</label>
+                                {{ form.msiStartMenuShortcut }}
+                            </div>
+                            <div class="field-block">
+                                <label for="{{ form.msiInstallPrinter.id_for_label }}">安装向导·打印机</label>
+                                {{ form.msiInstallPrinter }}
+                            </div>
+                        </div>
+                        <p class="help-text" style="margin-top:10px;">画质/编码/超时/白名单写入客户端 override；安装勾选项仅影响 Windows MSI。水印请用「品牌」里的隐私屏幕图。</p>
                     </div>
                 </section>
 
@@ -1920,6 +1992,75 @@
                 reader.readAsDataURL(input.files[0]);
             }
         }
+        function setCheckbox(name, checked) {
+            const el = document.querySelector(`[name="${name}"]`);
+            if (el && el.type === 'checkbox') el.checked = Boolean(checked);
+        }
+        function setField(name, value) {
+            const el = document.querySelector(`[name="${name}"]`);
+            if (!el) return;
+            if (el.type === 'radio') {
+                const radio = document.querySelector(`[name="${name}"][value="${value}"]`);
+                if (radio) radio.checked = true;
+                return;
+            }
+            el.value = value;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        function applyBuildPreset(kind) {
+            if (kind === 'agent') {
+                setField('direction', 'incoming');
+                setField('settings', 'settingsN');
+                setCheckbox('hideNetworkSetting', true);
+                setCheckbox('hideSettingsMenu', true);
+                setCheckbox('removeRecentSessions', true);
+                setCheckbox('defaultStartOnBoot', true);
+                setCheckbox('showStartOnBootCheckbox', true);
+                setCheckbox('forceDisableFileTransfer', true);
+                setField('permissionsType', 'view');
+                setField('permissionsDorO', 'override');
+                setCheckbox('enableKeyboard', false);
+                setCheckbox('enableClipboard', false);
+                setCheckbox('enableFileTransfer', false);
+                setCheckbox('enableFileCopyPaste', false);
+                setCheckbox('enableTerminal', false);
+                setField('msiDesktopShortcut', 'off');
+                setField('msiInstallPrinter', 'off');
+            } else if (kind === 'support') {
+                setField('direction', 'outgoing');
+                setField('settings', 'settingsY');
+                setCheckbox('hideNetworkSetting', true);
+                setCheckbox('removeRecentSessions', true);
+                setField('permissionsType', 'full');
+                setField('permissionsDorO', 'default');
+                setCheckbox('enableKeyboard', true);
+                setCheckbox('enableClipboard', true);
+                setCheckbox('enableFileTransfer', true);
+                setField('defaultImageQuality', 'balanced');
+                setField('msiDesktopShortcut', 'default');
+            } else if (kind === 'full') {
+                setField('direction', 'both');
+                setField('settings', 'settingsY');
+                setCheckbox('hideNetworkSetting', false);
+                setCheckbox('hideSettingsMenu', false);
+                setCheckbox('forceDisableFileTransfer', false);
+                setField('permissionsType', 'full');
+                setField('permissionsDorO', 'default');
+                setCheckbox('enableKeyboard', true);
+                setCheckbox('enableClipboard', true);
+                setCheckbox('enableFileTransfer', true);
+                setCheckbox('enableAudio', true);
+                setCheckbox('enablePrinter', true);
+                setCheckbox('enableCamera', true);
+                setCheckbox('enableTerminal', true);
+                setField('msiDesktopShortcut', 'default');
+                setField('msiStartMenuShortcut', 'default');
+            }
+            document.querySelectorAll('.platform-icon.active').forEach(() => {});
+            if (typeof updateBuildSummary === 'function') updateBuildSummary();
+            alert(kind === 'agent' ? '已套用「被控版」模板，请再核对服务器与密码。' : kind === 'support' ? '已套用「客服版」模板，请再核对服务器。' : '已套用「全功能版」模板。');
+        }
+
         async function saveFormData() {
             const filename = exenameInput.value;
             if (!filename) {

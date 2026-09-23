@@ -18,7 +18,16 @@ from .email_verification import (
     validate_registration_email_code,
 )
 from .membership import normalize_activation_code
-from .models import ActivationCode, UserEntitlement, get_user_entitlement
+from .models import (
+    ActivationCode,
+    SiteAliyunOssConfig,
+    SiteEmailConfig,
+    SiteOpsConfig,
+    SiteTencentCosConfig,
+    SiteWecomConfig,
+    UserEntitlement,
+    get_user_entitlement,
+)
 from .validators import minimum_password_help_text
 
 
@@ -45,6 +54,38 @@ class UsernameAuthenticationForm(AuthenticationForm):
         error_messages={"required": "请输入密码。"},
         widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),
     )
+
+
+class AdminAuthenticationForm(UsernameAuthenticationForm):
+    """Superuser login with a one-shot visual captcha."""
+
+    captcha = forms.CharField(
+        label="验证码",
+        max_length=8,
+        min_length=4,
+        strip=True,
+        error_messages={"required": "请输入验证码。"},
+        widget=forms.TextInput(
+            attrs={
+                "autocomplete": "off",
+                "autocapitalize": "characters",
+                "spellcheck": "false",
+                "inputmode": "text",
+                "placeholder": "不区分大小写",
+            }
+        ),
+    )
+
+    def clean(self):
+        from .admin_captcha import verify_admin_captcha
+
+        captcha = self.cleaned_data.get("captcha")
+        if not verify_admin_captcha(self.request, captcha):
+            self.add_error("captcha", "验证码不正确或已过期，请刷新后重试。")
+            # Drop credentials so AuthenticationForm does not authenticate.
+            self.cleaned_data.pop("password", None)
+            return self.cleaned_data
+        return super().clean()
 
 
 class PublicRegistrationForm(UserCreationForm):
@@ -148,6 +189,93 @@ class RegistrationEmailCodeRequestForm(forms.Form):
         return email
 
 
+class SiteEmailConfigForm(forms.ModelForm):
+    password = forms.CharField(
+        label="授权码 / SMTP 密码",
+        required=False,
+        widget=forms.PasswordInput(render_value=False, attrs={"autocomplete": "new-password"}),
+        help_text="留空表示不修改已保存的授权码。",
+    )
+    test_recipient = forms.EmailField(
+        label="测试收件邮箱",
+        required=False,
+        widget=forms.EmailInput(
+            attrs={
+                "placeholder": "留空则发到当前登录账号邮箱",
+                "autocomplete": "email",
+            }
+        ),
+        help_text="点「发送测试邮件」时使用。会先保存上方设置再发信。",
+    )
+
+    class Meta:
+        model = SiteEmailConfig
+        fields = (
+            "enabled",
+            "host",
+            "port",
+            "username",
+            "password",
+            "from_email",
+            "use_ssl",
+            "use_tls",
+        )
+        labels = {
+            "enabled": "启用邮件发送",
+            "host": "SMTP 服务器",
+            "port": "端口",
+            "username": "发信账号",
+            "from_email": "发件人地址",
+            "use_ssl": "使用 SSL（常见 465）",
+            "use_tls": "使用 TLS（常见 587）",
+        }
+        help_texts = {
+            "host": "例如 smtp.qq.com / smtp.163.com",
+            "from_email": "留空则使用发信账号作为发件人。",
+            "use_ssl": "与 TLS 一般二选一，不要同时开启。",
+            "use_tls": "与 SSL 一般二选一，不要同时开启。",
+        }
+
+    def __init__(self, *args, **kwargs):
+        self._default_test_recipient = (kwargs.pop("default_test_recipient", "") or "").strip()
+        super().__init__(*args, **kwargs)
+        self._existing_password = ""
+        if self.instance and self.instance.pk:
+            self._existing_password = self.instance.password or ""
+        if self._default_test_recipient and not self.data:
+            self.fields["test_recipient"].initial = self._default_test_recipient
+
+    def clean(self):
+        cleaned = super().clean()
+        use_ssl = cleaned.get("use_ssl")
+        use_tls = cleaned.get("use_tls")
+        if use_ssl and use_tls:
+            raise forms.ValidationError("SSL 与 TLS 不要同时开启，QQ 邮箱请只勾选 SSL。")
+        if cleaned.get("enabled"):
+            if not cleaned.get("host"):
+                self.add_error("host", "启用邮件时必须填写 SMTP 服务器。")
+            if not cleaned.get("username"):
+                self.add_error("username", "启用邮件时必须填写发信账号。")
+            if not (cleaned.get("password") or self._existing_password):
+                self.add_error("password", "启用邮件时必须填写授权码。")
+        return cleaned
+
+    def resolved_test_recipient(self):
+        value = (self.cleaned_data.get("test_recipient") or "").strip()
+        return value or self._default_test_recipient
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        new_password = self.cleaned_data.get("password") or ""
+        if new_password:
+            obj.password = new_password
+        else:
+            obj.password = self._existing_password
+        if commit:
+            obj.save()
+        return obj
+
+
 class ActivationCodeForm(forms.Form):
     code = forms.CharField(
         label="会员激活码",
@@ -188,6 +316,260 @@ class ActivationCodeGenerationForm(forms.Form):
         required=False,
         widget=forms.TextInput(attrs={"placeholder": "例如：闲鱼 8 月第一批"}),
     )
+    expires_at = forms.DateTimeField(
+        label="未使用过期时间（可选）",
+        required=False,
+        input_formats=["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"],
+        widget=forms.DateTimeInput(
+            format="%Y-%m-%dT%H:%M",
+            attrs={"type": "datetime-local"},
+        ),
+        help_text="到期后未使用的码会自动作废。留空表示不过期。",
+    )
+
+    def clean_expires_at(self):
+        expires_at = self.cleaned_data.get("expires_at")
+        if expires_at and timezone.is_naive(expires_at):
+            expires_at = timezone.make_aware(expires_at)
+        if expires_at and expires_at <= timezone.now():
+            raise forms.ValidationError("过期时间必须晚于当前时间。")
+        return expires_at
+
+
+class SiteOpsConfigForm(forms.ModelForm):
+    class Meta:
+        model = SiteOpsConfig
+        fields = ("maintenance_enabled", "maintenance_message", "announcement")
+        labels = {
+            "maintenance_enabled": "开启维护模式",
+            "maintenance_message": "维护页提示文案",
+            "announcement": "公告内容",
+        }
+        widgets = {
+            "maintenance_message": forms.Textarea(attrs={"rows": 3}),
+            "announcement": forms.Textarea(
+                attrs={
+                    "rows": 5,
+                    "placeholder": "例如：今晚 23:00–01:00 系统升级，生成可能延迟。",
+                }
+            ),
+        }
+        help_texts = {
+            "maintenance_enabled": "开启后前台对普通用户显示整页维护；超管可继续访问。",
+            "maintenance_message": "仅出现在维护页，不会作为弹窗。",
+            "announcement": "留空则不弹窗。有内容时在前台弹窗显示（非维护页横幅）。",
+        }
+
+
+class SiteWecomConfigForm(forms.ModelForm):
+    class Meta:
+        model = SiteWecomConfig
+        fields = (
+            "enabled",
+            "webhook_url",
+            "notify_remote_login",
+            "notify_admin_login",
+            "notify_build_failure",
+            "notify_build_success",
+        )
+        labels = {
+            "enabled": "启用企业微信通知",
+            "webhook_url": "群机器人 Webhook",
+            "notify_remote_login": "异地登录提醒",
+            "notify_admin_login": "超管登录成功提醒",
+            "notify_build_failure": "构建失败提醒",
+            "notify_build_success": "构建成功提醒",
+        }
+        widgets = {
+            "webhook_url": forms.URLInput(
+                attrs={
+                    "placeholder": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...",
+                    "autocomplete": "off",
+                }
+            ),
+        }
+        help_texts = {
+            "webhook_url": "企业微信群 → 添加群机器人 → 复制 Webhook 地址。仅用于超管后台提醒。",
+            "notify_admin_login": "每次超管成功登录都推一条（可能较吵，默认关）。",
+            "notify_build_failure": "构建进入失败/取消/超时等终态时推送。",
+            "notify_build_success": "安装包回传成功后推送（可能较吵，默认关）。",
+        }
+
+    def clean_webhook_url(self):
+        url = (self.cleaned_data.get("webhook_url") or "").strip()
+        if not url:
+            return ""
+        if not url.startswith("https://"):
+            raise forms.ValidationError("Webhook 必须是 https:// 地址。")
+        if "qyapi.weixin.qq.com" not in url:
+            raise forms.ValidationError("请填写企业微信官方机器人 Webhook 地址。")
+        if "key=" not in url:
+            raise forms.ValidationError("Webhook 地址缺少 key 参数。")
+        return url
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("enabled") and not cleaned.get("webhook_url"):
+            self.add_error("webhook_url", "启用通知时必须填写 Webhook 地址。")
+        return cleaned
+
+
+class SiteTencentCosConfigForm(forms.ModelForm):
+    secret_key = forms.CharField(
+        label="SecretKey",
+        required=False,
+        widget=forms.PasswordInput(render_value=False, attrs={"autocomplete": "new-password"}),
+        help_text="留空表示不修改已保存的 SecretKey。",
+    )
+
+    class Meta:
+        model = SiteTencentCosConfig
+        fields = ("enabled", "key_prefix", "secret_id", "secret_key", "region", "bucket")
+        labels = {
+            "enabled": "启用腾讯云 COS",
+            "key_prefix": "对象前缀",
+            "secret_id": "SecretId",
+            "region": "地域",
+            "bucket": "桶名",
+        }
+        widgets = {
+            "secret_id": forms.TextInput(attrs={"autocomplete": "off"}),
+            "region": forms.TextInput(attrs={"placeholder": "ap-guangzhou"}),
+            "bucket": forms.TextInput(
+                attrs={"placeholder": "rdgen-artifacts-125xxxxxxx", "autocomplete": "off"}
+            ),
+            "key_prefix": forms.TextInput(attrs={"placeholder": "rdgen"}),
+        }
+        help_texts = {
+            "enabled": "仅控制腾讯云 COS，与阿里云 OSS 互不影响。",
+            "key_prefix": "对象路径前缀，最终形如 rdgen/{uuid}/xxx.exe。",
+            "bucket": "只填桶名，例如 rdgen-artifacts-125xxxxxxx。不要填 https:// 或 .cos.xxx.myqcloud.com。",
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._existing_secret_key = ""
+        if self.instance and self.instance.pk:
+            self._existing_secret_key = self.instance.secret_key or ""
+
+    def clean_key_prefix(self):
+        value = (self.cleaned_data.get("key_prefix") or "").strip().strip("/")
+        return value or "rdgen"
+
+    def clean_bucket(self):
+        import re
+
+        value = (self.cleaned_data.get("bucket") or "").strip()
+        if not value:
+            return ""
+        value = value.replace("https://", "").replace("http://", "")
+        value = value.split("/")[0]
+        if ".cos." in value:
+            value = value.split(".cos.")[0]
+        if not re.fullmatch(r"[A-Za-z0-9-]+", value):
+            raise forms.ValidationError(
+                "桶名只能包含字母、数字和短横线 -。请填 rdgen-artifacts-125xxxxxxx，不要填访问域名。"
+            )
+        return value
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("enabled"):
+            for field in ("secret_id", "region", "bucket"):
+                if not (cleaned.get(field) or "").strip():
+                    self.add_error(field, "启用腾讯云 COS 时必填。")
+            if not (cleaned.get("secret_key") or self._existing_secret_key):
+                self.add_error("secret_key", "启用腾讯云 COS 时必须填写 SecretKey。")
+        return cleaned
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        obj.secret_key = self.cleaned_data.get("secret_key") or self._existing_secret_key
+        if commit:
+            obj.save()
+        return obj
+
+
+class SiteAliyunOssConfigForm(forms.ModelForm):
+    access_key_secret = forms.CharField(
+        label="AccessKeySecret",
+        required=False,
+        widget=forms.PasswordInput(render_value=False, attrs={"autocomplete": "new-password"}),
+        help_text="留空表示不修改已保存的 AccessKeySecret。",
+    )
+
+    class Meta:
+        model = SiteAliyunOssConfig
+        fields = (
+            "enabled",
+            "key_prefix",
+            "access_key_id",
+            "access_key_secret",
+            "endpoint",
+            "bucket",
+        )
+        labels = {
+            "enabled": "启用阿里云 OSS",
+            "key_prefix": "对象前缀",
+            "access_key_id": "AccessKeyId",
+            "endpoint": "Endpoint",
+            "bucket": "桶名",
+        }
+        widgets = {
+            "access_key_id": forms.TextInput(attrs={"autocomplete": "off"}),
+            "endpoint": forms.TextInput(
+                attrs={"placeholder": "https://oss-cn-hangzhou.aliyuncs.com"}
+            ),
+            "bucket": forms.TextInput(attrs={"autocomplete": "off"}),
+            "key_prefix": forms.TextInput(attrs={"placeholder": "rdgen"}),
+        }
+        help_texts = {
+            "enabled": "仅控制阿里云 OSS，与腾讯云 COS 互不影响。",
+            "key_prefix": "对象路径前缀，最终形如 rdgen/{uuid}/xxx.exe。",
+            "endpoint": "建议带 https://；地域需与桶一致。",
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._existing_access_key_secret = ""
+        if self.instance and self.instance.pk:
+            self._existing_access_key_secret = self.instance.access_key_secret or ""
+
+    def clean_key_prefix(self):
+        value = (self.cleaned_data.get("key_prefix") or "").strip().strip("/")
+        return value or "rdgen"
+
+    def clean_endpoint(self):
+        endpoint = (self.cleaned_data.get("endpoint") or "").strip()
+        if not endpoint:
+            return ""
+        if endpoint.startswith("http://"):
+            raise forms.ValidationError("请使用 https:// Endpoint。")
+        if not endpoint.startswith("https://"):
+            endpoint = f"https://{endpoint}"
+        return endpoint.rstrip("/")
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("enabled"):
+            for field in ("access_key_id", "endpoint", "bucket"):
+                if not (cleaned.get(field) or "").strip():
+                    self.add_error(field, "启用阿里云 OSS 时必填。")
+            if not (cleaned.get("access_key_secret") or self._existing_access_key_secret):
+                self.add_error(
+                    "access_key_secret",
+                    "启用阿里云 OSS 时必须填写 AccessKeySecret。",
+                )
+        return cleaned
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        obj.access_key_secret = (
+            self.cleaned_data.get("access_key_secret") or self._existing_access_key_secret
+        )
+        if commit:
+            obj.save()
+        return obj
 
 
 class ManagedUserCreationForm(UserCreationForm):
@@ -290,6 +672,12 @@ class ManagedUserEditForm(forms.ModelForm):
         required=False,
         min_value=1,
     )
+    disable_reason = forms.CharField(
+        label="禁用原因",
+        required=False,
+        max_length=255,
+        widget=forms.TextInput(attrs={"placeholder": "停用时可填写原因，便于复盘"}),
+    )
 
     class Meta:
         model = User
@@ -303,6 +691,7 @@ class ManagedUserEditForm(forms.ModelForm):
             "expiration_mode",
             "expires_at",
             "generation_limit",
+            "disable_reason",
         )
         labels = {"username": "用户名"}
 
@@ -315,6 +704,7 @@ class ManagedUserEditForm(forms.ModelForm):
                 "expiration_mode": entitlement.expiration_mode,
                 "expires_at": entitlement.expires_at,
                 "generation_limit": entitlement.generation_limit,
+                "disable_reason": entitlement.disable_reason,
             }
         )
         if not actor or not actor.is_superuser:
@@ -325,6 +715,14 @@ class ManagedUserEditForm(forms.ModelForm):
         if commit:
             entitlement, _created = UserEntitlement.objects.get_or_create(user=user)
             _apply_entitlement_fields(entitlement, self.cleaned_data)
+            reason = (self.cleaned_data.get("disable_reason") or "").strip()
+            if not user.is_active:
+                entitlement.disable_reason = reason
+            elif user.is_active and not reason:
+                entitlement.disable_reason = ""
+            else:
+                entitlement.disable_reason = reason
+            entitlement.save(update_fields=["disable_reason", "updated_at"])
         return user
 
     def clean(self):
@@ -637,16 +1035,51 @@ class GenerateForm(forms.Form):
     )
 
     #Custom Server
-    serverIP = forms.CharField(label="ID 服务器", required=False, validators=[SAFE_SCRIPT_VALUE])
+    serverIP = forms.CharField(
+        label="ID 服务器（hbbs）",
+        required=False,
+        validators=[SAFE_SCRIPT_VALUE],
+        widget=forms.TextInput(
+            attrs={
+                "placeholder": "hbbs.example.com 或 hbbs.example.com:21116",
+                "autocomplete": "off",
+            }
+        ),
+    )
     relayServer = forms.CharField(
-        label="固定中继服务器",
+        label="固定中继服务器（hbbr）",
         required=False,
         validators=[SAFE_SCRIPT_VALUE, SINGLE_RELAY_SERVER],
+        widget=forms.TextInput(
+            attrs={
+                "placeholder": "通常留空；例 hbbr.example.com:21117",
+                "autocomplete": "off",
+            }
+        ),
     )
     apiServer = forms.CharField(
-        label="API 服务", required=False, validators=[SAFE_SCRIPT_VALUE, HTTP_URL]
+        label="API 服务器",
+        required=False,
+        validators=[SAFE_SCRIPT_VALUE, HTTP_URL],
+        widget=forms.TextInput(
+            attrs={
+                "placeholder": "Pro：http://主机:21114 或 https://域名",
+                "autocomplete": "off",
+            }
+        ),
     )
-    key = forms.CharField(label="密钥", required=False, validators=[SAFE_SCRIPT_VALUE])
+    key = forms.CharField(
+        label="密钥（公钥 Key）",
+        required=False,
+        validators=[SAFE_SCRIPT_VALUE],
+        widget=forms.TextInput(
+            attrs={
+                "placeholder": "id_ed25519.pub 文件内容",
+                "autocomplete": "off",
+                "spellcheck": "false",
+            }
+        ),
+    )
     urlLink = forms.CharField(
         label="站内链接地址", required=False, validators=[SAFE_SCRIPT_VALUE, HTTP_URL]
     )
@@ -719,6 +1152,110 @@ class GenerateForm(forms.Form):
     removeNewVersionNotif = forms.BooleanField(initial=False, required=False)
     hideSettingsMenu = forms.BooleanField(initial=False, required=False)
     removeRecentSessions = forms.BooleanField(initial=False, required=False)
+
+    # White-label / enterprise extras
+    defaultStartOnBoot = forms.BooleanField(
+        label="默认开启开机自启",
+        initial=False,
+        required=False,
+        help_text="写入客户端设置，安装后默认勾选并启用开机自启。",
+    )
+    sloganText = forms.CharField(
+        label="关于页 Slogan",
+        required=False,
+        max_length=80,
+        validators=[SAFE_SCRIPT_VALUE],
+        widget=forms.TextInput(
+            attrs={"placeholder": "例如：企业内部远程协助客户端", "autocomplete": "off"}
+        ),
+    )
+    macosBundleId = forms.CharField(
+        label="macOS Bundle ID",
+        required=False,
+        max_length=120,
+        validators=[SAFE_SCRIPT_VALUE],
+        widget=forms.TextInput(
+            attrs={
+                "placeholder": "留空则自动 com.rdgen.{配置名}",
+                "autocomplete": "off",
+                "spellcheck": "false",
+            }
+        ),
+    )
+    defaultImageQuality = forms.ChoiceField(
+        label="默认画质",
+        required=False,
+        choices=[
+            ("", "不强制（跟随客户端）"),
+            ("best", "最佳"),
+            ("balanced", "均衡"),
+            ("low", "流畅优先"),
+        ],
+        initial="",
+    )
+    defaultCodec = forms.ChoiceField(
+        label="默认编码",
+        required=False,
+        choices=[
+            ("", "不强制（自动）"),
+            ("auto", "自动"),
+            ("vp9", "VP9"),
+            ("av1", "AV1"),
+            ("h264", "H264"),
+        ],
+        initial="",
+    )
+    preferWebsocket = forms.BooleanField(
+        label="默认优先 WebSocket 中继",
+        initial=False,
+        required=False,
+    )
+    sessionIdleMinutes = forms.IntegerField(
+        label="会话空闲超时（分钟）",
+        required=False,
+        min_value=1,
+        max_value=1440,
+        widget=forms.NumberInput(attrs={"min": 1, "max": 1440, "placeholder": "留空不限制"}),
+    )
+    allowIdPrefixes = forms.CharField(
+        label="仅允许连接的 ID 前缀",
+        required=False,
+        max_length=200,
+        validators=[SAFE_SCRIPT_VALUE],
+        widget=forms.TextInput(
+            attrs={
+                "placeholder": "逗号分隔，例如 12,34（写入 whitelist）",
+                "autocomplete": "off",
+            }
+        ),
+    )
+    msiDesktopShortcut = forms.ChoiceField(
+        label="安装时桌面图标",
+        required=False,
+        choices=[
+            ("default", "默认勾选"),
+            ("off", "默认不勾选"),
+        ],
+        initial="default",
+    )
+    msiStartMenuShortcut = forms.ChoiceField(
+        label="安装时开始菜单",
+        required=False,
+        choices=[
+            ("default", "默认勾选"),
+            ("off", "默认不勾选"),
+        ],
+        initial="default",
+    )
+    msiInstallPrinter = forms.ChoiceField(
+        label="安装时打印机驱动",
+        required=False,
+        choices=[
+            ("off", "默认不勾选"),
+            ("default", "默认勾选"),
+        ],
+        initial="off",
+    )
 
     def clean_defaultManual(self):
         value = self.cleaned_data.get('defaultManual', '')

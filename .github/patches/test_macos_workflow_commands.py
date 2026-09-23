@@ -77,9 +77,13 @@ class MacOSWorkflowCommandTests(unittest.TestCase):
         )
         self.assertIn("PRODUCT_NAME = ${{ env.appname }}", update_step)
         self.assertIn('MACOS_BUNDLE_ID="com.rdgen.${BUNDLE_SUFFIX}"', update_step)
+        self.assertIn("env.macosBundleId", update_step)
+        self.assertIn("env.sloganText", update_step)
+        self.assertIn("Slogan_tip", update_step)
         self.assertIn("--platform=macos", validate_step)
         self.assertIn('--app-name="${{ env.appname }}"', validate_step)
-        self.assertIn('--macos-bundle-id="com.rdgen.${BUNDLE_SUFFIX}"', validate_step)
+        self.assertIn("EXPECTED_BUNDLE_ID", validate_step)
+        self.assertIn("--macos-bundle-id=\"${EXPECTED_BUNDLE_ID}\"", validate_step)
 
     def test_both_architectures_produce_distinct_dmg_names(self):
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")

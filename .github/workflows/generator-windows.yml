@@ -204,6 +204,16 @@ jobs:
           fi
           find ./src/lang -name "*.rs" -exec sed -i -e 's|RustDesk|${{ env.appname }}|' {} \;
           sed -i -e 's|RustDesk|${{ env.appname }}|' ./res/msi/Package/License.rtf
+          # Custom about-page slogan (falls back to Powered by appname)
+          SLOGAN='${{ env.sloganText }}'
+          if [ -z "$SLOGAN" ]; then
+            SLOGAN="Powered by ${{ env.appname }}"
+          fi
+          # Escape sed replacement metacharacters in slogan
+          SLOGAN_ESC=$(printf '%s' "$SLOGAN" | sed -e 's/[&|\\]/\\&/g')
+          sed -i -E -e "s/\\(\"Slogan_tip\", \"[^\"]*\"\\)/(\"Slogan_tip\", \"${SLOGAN_ESC}\")/" ./src/lang/en.rs
+          # After RustDesk→appname rename, About key may already use appname
+          sed -i -E -e "s/\\(\"About ${{ env.appname }}\", \"\"\\)/(\"About ${{ env.appname }}\", \"${SLOGAN_ESC}\")/" ./src/lang/en.rs || true
 
       - name: fix registry if appname has a space
         if: contains(env.appname, ' ')
@@ -732,6 +742,17 @@ jobs:
           Invoke-WebRequest -Uri https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/.github/patches/configure_windows_msi_zh_cn.py -OutFile configure_windows_msi_zh_cn.py
           Invoke-WebRequest -Uri https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/.github/patches/msi/WixUI_zh-CN.wxl -OutFile WixUI_zh-CN.wxl
           python configure_windows_msi_zh_cn.py
+
+      - name: Configure MSI install-wizard defaults
+        if: env.msiDesktopShortcut == 'off' || env.msiStartMenuShortcut == 'off' || env.msiInstallPrinter == 'default'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/.github/patches/configure_msi_install_defaults.py -OutFile configure_msi_install_defaults.py
+          $args = @()
+          if ("${{ env.msiDesktopShortcut }}" -eq "off") { $args += @("--desktop", "off") }
+          if ("${{ env.msiStartMenuShortcut }}" -eq "off") { $args += @("--start-menu", "off") }
+          if ("${{ env.msiInstallPrinter }}" -eq "default") { $args += @("--printer", "default") }
+          python configure_msi_install_defaults.py @args
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
