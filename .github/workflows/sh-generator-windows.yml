@@ -627,6 +627,13 @@ jobs:
           Invoke-WebRequest -Uri https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/.github/patches/configure_windows_msi_utf8.py -OutFile configure_windows_msi_utf8.py
           python configure_windows_msi_utf8.py
 
+      - name: Configure MSI Chinese UI
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/.github/patches/configure_windows_msi_zh_cn.py -OutFile configure_windows_msi_zh_cn.py
+          Invoke-WebRequest -Uri https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/.github/patches/msi/WixUI_zh-CN.wxl -OutFile WixUI_zh-CN.wxl
+          python configure_windows_msi_zh_cn.py
+
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
@@ -639,8 +646,11 @@ jobs:
           python preprocess.py --app-name "$myappname" --arp -d ../../rustdesk
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
-          cp ./Package/bin/x64/Release/en-us/Package.msi ../../SignOutput/rustdesk-latest.msi
-          mv ./Package/bin/x64/Release/en-us/Package.msi ../../SignOutput/rustdesk.msi
+          $msi = Get-ChildItem ./Package/bin/x64/Release -Recurse -Filter Package.msi | Select-Object -First 1
+          if (-not $msi) { throw "Package.msi not found under Package/bin/x64/Release" }
+          Write-Host "Using MSI $($msi.FullName)"
+          Copy-Item $msi.FullName ../../SignOutput/rustdesk-latest.msi -Force
+          Move-Item $msi.FullName ../../SignOutput/rustdesk.msi -Force
           sha256sum ../../SignOutput/rustdesk.msi
 
       - name: zip exe and msi
