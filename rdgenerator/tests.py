@@ -52,7 +52,7 @@ class GeneratorFeaturePayloadTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "ID 服务器")
         self.assertContains(response, 'name="relayServer"')
-        self.assertContains(response, "通常留空，由 ID 服务器选择健康中继")
+        self.assertContains(response, "通常留空，由 ID 服务器（hbbs）自动选择健康的")
         self.assertContains(response, "填写后将强制使用单个 hbbr")
         self.assertContains(response, "不能填写逗号分隔的列表")
         self.assertNotContains(
@@ -820,8 +820,9 @@ class GeneratorFeaturePayloadTests(TestCase):
         self.assertEqual(inputs_raw["logolink_url"], "false")
         self.assertEqual(inputs_raw["privacylink_url"], "false")
 
-    def test_default_version_is_1_4_9(self):
-        self.assertEqual(GenerateForm().fields["version"].initial, "1.4.9")
+    def test_default_version_is_1_5_0(self):
+        self.assertEqual(GenerateForm().fields["version"].initial, "1.5.0")
+        self.assertIn(("1.5.0", "1.5.0"), GenerateForm().fields["version"].choices)
 
     def test_smart_multi_relay_missing_input_defaults_false_and_is_serialized(self):
         data = self._feature_payload()
@@ -844,7 +845,7 @@ class GeneratorFeaturePayloadTests(TestCase):
                 self.assertTrue(form.cleaned_data["smartMultiRelay"])
 
     def test_smart_multi_relay_rejects_nightly_and_other_versions(self):
-        for version in ("master", "1.4.8"):
+        for version in ("master", "1.4.8", "1.5.0"):
             with self.subTest(version=version):
                 form = GenerateForm(
                     data=self._smart_multi_relay_payload(version=version)
@@ -899,15 +900,18 @@ class GeneratorFeaturePayloadTests(TestCase):
 
     def test_silent_agent_mode_accepts_locked_windows_matrix(self):
         for platform in ("windows", "windows-x86"):
-            with self.subTest(platform=platform):
-                form = GenerateForm(data=self._silent_agent_payload(platform))
-                self.assertTrue(form.is_valid(), form.errors)
-                self.assertTrue(form.cleaned_data["silentAgentMode"])
-                self.assertTrue(form.cleaned_data["silentInstallOnDoubleClick"])
-                self.assertTrue(form.cleaned_data["hideTray"])
-                self.assertTrue(form.cleaned_data["hidecm"])
-                self.assertTrue(form.cleaned_data["hidecmDefaultEnabled"])
-                self.assertEqual(form.cleaned_data["passApproveMode"], "password")
+            for version in ("1.4.9", "1.5.0"):
+                with self.subTest(platform=platform, version=version):
+                    form = GenerateForm(
+                        data=self._silent_agent_payload(platform, version=version)
+                    )
+                    self.assertTrue(form.is_valid(), form.errors)
+                    self.assertTrue(form.cleaned_data["silentAgentMode"])
+                    self.assertTrue(form.cleaned_data["silentInstallOnDoubleClick"])
+                    self.assertTrue(form.cleaned_data["hideTray"])
+                    self.assertTrue(form.cleaned_data["hidecm"])
+                    self.assertTrue(form.cleaned_data["hidecmDefaultEnabled"])
+                    self.assertEqual(form.cleaned_data["passApproveMode"], "password")
 
     def test_silent_agent_mode_rejects_other_versions(self):
         for version in ("master", "1.4.8"):
@@ -917,7 +921,7 @@ class GeneratorFeaturePayloadTests(TestCase):
                 )
                 self.assertFalse(form.is_valid())
                 self.assertIn("silentAgentMode", form.errors)
-                self.assertIn("仅支持 RustDesk 1.4.9", form.errors["silentAgentMode"][0])
+                self.assertIn("仅支持 RustDesk 1.4.9 和 1.5.0", form.errors["silentAgentMode"][0])
 
     def test_silent_agent_mode_rejects_non_windows_platforms(self):
         for platform in ("linux", "macos", "android"):
