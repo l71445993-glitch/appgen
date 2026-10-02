@@ -339,11 +339,17 @@ class ActivationCodeGenerationForm(forms.Form):
 class SiteOpsConfigForm(forms.ModelForm):
     class Meta:
         model = SiteOpsConfig
-        fields = ("maintenance_enabled", "maintenance_message", "announcement")
+        fields = (
+            "maintenance_enabled",
+            "maintenance_message",
+            "announcement",
+            "max_concurrent_builds",
+        )
         labels = {
             "maintenance_enabled": "开启维护模式",
             "maintenance_message": "维护页提示文案",
             "announcement": "公告内容",
+            "max_concurrent_builds": "最大并发生成数",
         }
         widgets = {
             "maintenance_message": forms.Textarea(attrs={"rows": 3}),
@@ -353,12 +359,24 @@ class SiteOpsConfigForm(forms.ModelForm):
                     "placeholder": "例如：今晚 23:00–01:00 系统升级，生成可能延迟。",
                 }
             ),
+            "max_concurrent_builds": forms.NumberInput(attrs={"min": 1, "max": 10, "step": 1}),
         }
         help_texts = {
             "maintenance_enabled": "开启后前台对普通用户显示整页维护；超管可继续访问。",
             "maintenance_message": "仅出现在维护页，不会作为弹窗。",
             "announcement": "留空则不弹窗。有内容时在前台弹窗显示（非维护页横幅）。",
+            "max_concurrent_builds": "建议 1～2。多人同时点生成时，超出的任务会排队，避免 GitHub Actions 被打爆。",
         }
+
+    def clean_max_concurrent_builds(self):
+        value = self.cleaned_data.get("max_concurrent_builds")
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            raise forms.ValidationError("请填写 1～10 的整数。")
+        if value < 1 or value > 10:
+            raise forms.ValidationError("并发生成数需在 1～10 之间。")
+        return value
 
 
 class SiteWecomConfigForm(forms.ModelForm):
@@ -369,6 +387,8 @@ class SiteWecomConfigForm(forms.ModelForm):
             "webhook_url",
             "notify_remote_login",
             "notify_admin_login",
+            "notify_build_submitted",
+            "notify_build_progress",
             "notify_build_failure",
             "notify_build_success",
         )
@@ -377,6 +397,8 @@ class SiteWecomConfigForm(forms.ModelForm):
             "webhook_url": "群机器人 Webhook",
             "notify_remote_login": "异地登录提醒",
             "notify_admin_login": "超管登录成功提醒",
+            "notify_build_submitted": "构建提交提醒",
+            "notify_build_progress": "排队 / 构建中 / 回传中提醒",
             "notify_build_failure": "构建失败提醒",
             "notify_build_success": "构建成功提醒",
         }
@@ -391,8 +413,10 @@ class SiteWecomConfigForm(forms.ModelForm):
         help_texts = {
             "webhook_url": "企业微信群 → 添加群机器人 → 复制 Webhook 地址。仅用于超管后台提醒。",
             "notify_admin_login": "每次超管成功登录都推一条（可能较吵，默认关）。",
-            "notify_build_failure": "构建进入失败/取消/超时等终态时推送。",
-            "notify_build_success": "安装包回传成功后推送（可能较吵，默认关）。",
+            "notify_build_submitted": "用户点生成且 GitHub 受理后推送（含平台/应用/服务器/UUID）。",
+            "notify_build_progress": "状态变为排队中、构建中、回传安装包时推送。",
+            "notify_build_failure": "构建进入失败/取消/超时等终态时推送，含失败摘要与 Actions 链接。",
+            "notify_build_success": "安装包回传成功后推送，含文件列表、结果页与耗时。",
         }
 
     def clean_webhook_url(self):
@@ -842,6 +866,8 @@ WINDOWS_RESERVED_NAME = re.compile(
 )
 MAX_BUILD_NAME_UTF8_BYTES = 200
 BEIJING_LINUX_VERSIONS = {"1.4.7", "1.4.8", "1.4.9"}
+SILENT_AGENT_VERSIONS = {"1.4.9", "1.5.0"}
+SMART_MULTI_RELAY_VERSIONS = {"1.4.9"}
 FORM_SCHEMA_VERSION = "2"
 SMART_MULTI_RELAY_PLATFORMS = {'windows', 'windows-x86', 'linux', 'android'}
 SMART_RENDEZVOUS_DOMAIN = re.compile(
@@ -948,8 +974,8 @@ class GenerateForm(forms.Form):
         ('ios', 'iOS（未签名 IPA）'),
     ], initial='windows')
     version = forms.ChoiceField(
-        choices=[('master','nightly'),('1.4.9','1.4.9'),('1.4.8','1.4.8'),('1.4.7','1.4.7'),('1.4.6','1.4.6'),('1.4.5','1.4.5'),('1.4.4','1.4.4'),('1.4.3','1.4.3'),('1.4.2','1.4.2'),('1.4.1','1.4.1'),('1.4.0','1.4.0'),('1.3.9','1.3.9'),('1.3.8','1.3.8'),('1.3.7','1.3.7'),('1.3.6','1.3.6'),('1.3.5','1.3.5'),('1.3.4','1.3.4'),('1.3.3','1.3.3')],
-        initial='1.4.9',
+        choices=[('master','nightly'),('1.5.0','1.5.0'),('1.4.9','1.4.9'),('1.4.8','1.4.8'),('1.4.7','1.4.7'),('1.4.6','1.4.6'),('1.4.5','1.4.5'),('1.4.4','1.4.4'),('1.4.3','1.4.3'),('1.4.2','1.4.2'),('1.4.1','1.4.1'),('1.4.0','1.4.0'),('1.3.9','1.3.9'),('1.3.8','1.3.8'),('1.3.7','1.3.7'),('1.3.6','1.3.6'),('1.3.5','1.3.5'),('1.3.4','1.3.4'),('1.3.3','1.3.3')],
+        initial='1.5.0',
         help_text="nightly 是开发版，功能更新但稳定性可能较低"
     )
     delayFix = forms.BooleanField(initial=True, required=False)
@@ -1356,10 +1382,10 @@ class GenerateForm(forms.Form):
 
         smart_multi_relay = bool(cleaned.get('smartMultiRelay'))
         if smart_multi_relay:
-            if version != '1.4.9':
+            if version not in SMART_MULTI_RELAY_VERSIONS:
                 self.add_error(
                     'smartMultiRelay',
-                    '智能多中继仅支持 RustDesk 1.4.9；nightly 和其他版本暂不支持。',
+                    '智能多中继当前仅支持 RustDesk 1.4.9（补丁锁定）；1.5.0 及其他版本暂不支持。',
                 )
             if platform not in SMART_MULTI_RELAY_PLATFORMS:
                 self.add_error(
@@ -1393,10 +1419,10 @@ class GenerateForm(forms.Form):
                     'silentAgentMode',
                     '隐藏主窗口的静默代理模式仅支持 Windows 64 位和 Windows 32 位。',
                 )
-            if version != '1.4.9':
+            if version not in SILENT_AGENT_VERSIONS:
                 self.add_error(
                     'silentAgentMode',
-                    '隐藏主窗口的静默代理模式当前仅支持 RustDesk 1.4.9。',
+                    '隐藏主窗口的静默代理模式当前仅支持 RustDesk 1.4.9 和 1.5.0。',
                 )
             if cleaned.get('installation') != 'installationY':
                 self.add_error(
