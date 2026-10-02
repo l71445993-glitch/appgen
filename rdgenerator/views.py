@@ -66,6 +66,7 @@ ARTIFACT_INCOMPLETE_STATUS = "artifact_incomplete"
 # Typical GitHub Actions wall time used only for soft progress estimation.
 EXPECTED_BUILD_SECONDS = 40 * 60
 WAITING_STATUS_LABELS = {
+    "waiting_slot": "排队等待空位",
     "queued": "排队中",
     "starting": "准备中",
     "in_progress": "构建中",
@@ -121,7 +122,7 @@ def _waiting_progress_percent(run, status=None):
     # Asymptotic time factor so long builds keep creeping without hitting the cap.
     time_factor = 1.0 - math.exp(-elapsed / float(EXPECTED_BUILD_SECONDS))
 
-    if status in {"", "queued", "starting"} or "start" in status:
+    if status in {"", "queued", "starting", "waiting_slot"} or "start" in status:
         low, high = 4, 18
     elif status == ARTIFACT_PENDING_STATUS:
         low, high = 82, 96
@@ -132,10 +133,19 @@ def _waiting_progress_percent(run, status=None):
     return int(round(low + (high - low) * time_factor))
 
 
-def _waiting_page_context(run, *, filename, platform, log_url, status=None):
+def _waiting_page_context(run, *, filename, platform, log_url, status=None, queue_meta=None):
     current = status if status is not None else (run.status or "")
     created = getattr(run, "created_at", None)
     created_ms = int(created.timestamp() * 1000) if created else 0
+    meta = queue_meta or {}
+    position = meta.get("position")
+    if position is None and (current or "").lower() == "waiting_slot":
+        try:
+            from .build_queue import queue_position
+
+            position = queue_position(run)
+        except Exception:
+            position = 0
     return {
         "filename": filename,
         "uuid": str(run.uuid),
@@ -147,6 +157,9 @@ def _waiting_page_context(run, *, filename, platform, log_url, status=None):
         "log_url": log_url,
         "download_access": run.download_access,
         "download_ttl_hours": run.download_ttl_hours,
+        "queue_position": position or 0,
+        "queue_active": meta.get("active"),
+        "queue_max": meta.get("max"),
     }
 
 
@@ -518,6 +531,33 @@ def _generator_context(request, form):
         "entitlement_summary": _entitlement_summary(request.user),
     }
 
+
+def _post_with_brand_base64(post, files):
+    """Keep uploaded brand PNGs across validation re-renders via base64 fields."""
+    data = post.copy()
+    mapping = (
+        ("iconfile", "iconbase64"),
+        ("logofile", "logobase64"),
+        ("privacyfile", "privacybase64"),
+    )
+    for file_key, b64_key in mapping:
+        existing = (data.get(b64_key) or "").strip()
+        if existing.startswith("data:image/png;base64,"):
+            continue
+        upload = files.get(file_key) if files is not None else None
+        if upload is None:
+            continue
+        try:
+            raw = upload.read()
+            upload.seek(0)
+        except Exception:
+            continue
+        if not raw:
+            continue
+        data[b64_key] = "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+    return data
+
+
 @login_required
 def generator_view(request):
     if request.method == 'POST':
@@ -536,7 +576,7 @@ def generator_view(request):
             silentAgentMode = (
                 form.cleaned_data['silentAgentMode']
                 and platform in windows_platforms
-                and version == '1.4.9'
+                and version in {'1.4.9', '1.5.0'}
             )
             smartMultiRelay = form.cleaned_data['smartMultiRelay']
             beijingCustom = form.cleaned_data['beijingCustom'] and platform == 'linux'
@@ -1006,13 +1046,6 @@ def generator_view(request):
                     "zip_url":zip_url
                 },
                 "return_run_details": True
-            } 
-            #print(data)
-            from .github_auth import github_auth_headers
-
-            headers = {
-                **github_auth_headers(),
-                "Content-Type": "application/json",
             }
             download_access = form.cleaned_data.get("download_access") or "login"
             download_ttl_hours = min(
@@ -1020,11 +1053,9 @@ def generator_view(request):
                 168,
             )
             download_token = download_token_for_run(myuuid)
-            initial_status = (
-                ARTIFACT_PENDING_STATUS
-                if platform == "windows"
-                else "in_progress"
-            )
+            from .build_queue import WAITING_SLOT_STATUS, enqueue_or_hint
+
+            initial_status = WAITING_SLOT_STATUS
             config_snapshot = build_config_snapshot(
                 form_data=form.cleaned_data,
                 decoded_custom=decodedCustom,
@@ -1124,60 +1155,56 @@ def generator_view(request):
                     download_ttl_hours=download_ttl_hours,
                     download_token_hash=_callback_token_hash(download_token),
                     config_snapshot=config_snapshot,
+                    dispatch_url=url,
+                    dispatch_payload=data,
                 )
             except GenerationQuotaExceeded:
-                # The form has already been normalized and temporary files
-                # may exist; do not dispatch a workflow when the entitlement
-                # is exhausted or expired.
                 form.add_error(None, "当前账号的生成额度已用尽或已过期，无法开始新的生成任务。")
                 return render(request, "generator.html", _generator_context(request, form))
 
-            # Persist the run before dispatch so any rejected/failed request
-            # can release a count reservation atomically.
-            try:
-                response = requests.post(url, json=data, headers=headers)
-                print(response)
-                if response.status_code == 204 or response.status_code == 200:
-                    github_data = {}
-                    if response.content:
-                        try:
-                            github_data = response.json()
-                            print(github_data)
-                        except ValueError as e:
-                            print(f"GitHub dispatch returned non-JSON success body: {e}")
-                    workflow_run_id = github_data.get('workflow_run_id')
-                    if workflow_run_id:
-                        GithubRun.objects.filter(
-                            pk=new_github_run.pk,
-                            status=initial_status,
-                        ).update(github_run_id=workflow_run_id)
+            queue_meta = enqueue_or_hint(new_github_run)
+            new_github_run.refresh_from_db()
+            if new_github_run.status == "dispatch_failed":
+                return JsonResponse(
+                    {
+                        "error": "GitHub rejected the start request",
+                        "details": new_github_run.failure_summary or "",
+                    },
+                    status=500,
+                )
 
-                    log_url = github_data.get('html_url') or f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}/actions"
-                    return render(
-                        request,
-                        "waiting.html",
-                        _waiting_page_context(
-                            new_github_run,
-                            filename=filename,
-                            platform=platform,
-                            log_url=log_url,
-                            status=new_github_run.status or "queued",
-                        ),
-                    )
-                else:
-                    transitioned = GithubRun.objects.filter(
-                        pk=new_github_run.pk,
-                        status=initial_status,
-                    ).update(status="dispatch_failed")
-                    if transitioned:
-                        new_github_run.refresh_from_db()
-                        release_generation_reservation(new_github_run)
-                    return JsonResponse({"error": "GitHub rejected the start request", "details": response.text}, status=500)
-            except Exception as e:
-                # A connection error is ambiguous: GitHub may have accepted the
-                # dispatch before the response was lost. Keep the run able to
-                # receive its authenticated callbacks and artifacts.
-                return JsonResponse({"error": f"Connection error: {str(e)}"}, status=500)
+            log_url = (
+                f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}/actions"
+            )
+            if new_github_run.github_run_id:
+                log_url = (
+                    f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}"
+                    f"/actions/runs/{new_github_run.github_run_id}"
+                )
+            elif new_github_run.status == WAITING_SLOT_STATUS:
+                try:
+                    from .wecom_notify import notify_build_submitted
+
+                    notify_build_submitted(new_github_run, github_url=log_url)
+                except Exception:
+                    pass
+
+            return render(
+                request,
+                "waiting.html",
+                _waiting_page_context(
+                    new_github_run,
+                    filename=filename,
+                    platform=platform,
+                    log_url=log_url,
+                    status=new_github_run.status or WAITING_SLOT_STATUS,
+                    queue_meta=queue_meta,
+                ),
+            )
+        # Validation failed: keep uploaded brand images via base64 so the page
+        # can restore previews after the browser drops file inputs.
+        form = GenerateForm(_post_with_brand_base64(request.POST, request.FILES))
+        form.is_valid()
     else:
         form = GenerateForm()
     #return render(request, 'maintenance.html')
@@ -1233,8 +1260,20 @@ def check_for_file(request):
         # A failed/cancelled workflow must not hold a reserved count forever.
         release_generation_reservation(gh_run)
         gh_run.refresh_from_db()
-    
+        try:
+            from .build_queue import try_dispatch_queued_builds
+
+            try_dispatch_queued_builds()
+        except Exception:
+            pass
+
     if current_status == "success":
+        try:
+            from .build_queue import try_dispatch_queued_builds
+
+            try_dispatch_queued_builds()
+        except Exception:
+            pass
         files = list_generated_files(run_uuid)
         success_ctx = {
             "filename": filename,
@@ -1286,6 +1325,25 @@ def check_for_file(request):
         log_url=github_log_url,
         status=gh_run.status,
     )
+    if (gh_run.status or "").lower() == "waiting_slot":
+        try:
+            from .build_queue import enqueue_or_hint
+
+            waiting_ctx.update(
+                {
+                    "queue_position": enqueue_or_hint(gh_run).get("position") or waiting_ctx.get("queue_position"),
+                }
+            )
+            gh_run.refresh_from_db()
+            waiting_ctx = _waiting_page_context(
+                gh_run,
+                filename=filename,
+                platform=platform,
+                log_url=github_log_url,
+                status=gh_run.status,
+            )
+        except Exception:
+            pass
     if request.GET.get("format") == "json":
         return JsonResponse(
             {
@@ -1294,6 +1352,7 @@ def check_for_file(request):
                 "status_label": waiting_ctx["status_label"],
                 "progress": waiting_ctx["progress_percent"],
                 "created_at_ms": waiting_ctx["created_at_ms"],
+                "queue_position": waiting_ctx.get("queue_position") or 0,
             }
         )
     return render(request, "waiting.html", waiting_ctx)
@@ -1406,6 +1465,7 @@ def update_github_run(request):
     run, error = _status_run(request, myuuid, mystatus)
     if error:
         return error
+    previous_status = (run.status or "").strip().lower()
     blocked_sources = set(TERMINAL_RUN_STATUSES)
     if mystatus not in FAILED_TERMINAL_RUN_STATUSES:
         blocked_sources.add(ARTIFACT_PENDING_STATUS)
@@ -1414,18 +1474,53 @@ def update_github_run(request):
     )
     if mystatus == "success" and run.platform == "windows":
         status_filter = status_filter.exclude(platform="windows")
-    status_filter.update(status=mystatus)
+    updated = status_filter.update(status=mystatus)
 
-    run.refresh_from_db(fields=["status", "artifact_uploaded_at", "quota_reserved", "quota_counted"])
+    run.refresh_from_db(
+        fields=[
+            "status",
+            "artifact_uploaded_at",
+            "quota_reserved",
+            "quota_counted",
+            "failure_summary",
+            "github_run_id",
+            "config_snapshot",
+            "artifact_stem",
+            "download_access",
+            "platform",
+            "uuid",
+            "created_at",
+            "owner_id",
+        ]
+    )
+    if updated and previous_status != mystatus:
+        try:
+            from .wecom_notify import notify_build_progress
+
+            notify_run = (
+                GithubRun.objects.select_related("owner").filter(pk=run.pk).first() or run
+            )
+            notify_build_progress(notify_run, previous_status=previous_status)
+        except Exception:
+            pass
     if run.status in FAILED_TERMINAL_RUN_STATUSES and not run.artifact_uploaded_at:
         release_generation_reservation(run)
         try:
-            from .wecom_notify import format_build_failure_alert, notify_wecom_if_enabled
+            from .wecom_notify import notify_build_failure
 
-            notify_wecom_if_enabled(
-                "build_failure",
-                format_build_failure_alert(run=run),
+            notify_run = (
+                GithubRun.objects.select_related("owner").filter(pk=run.pk).first() or run
             )
+            notify_build_failure(notify_run)
+        except Exception:
+            pass
+    if (run.status or "") in TERMINAL_RUN_STATUSES or (
+        updated and previous_status != mystatus
+    ):
+        try:
+            from .build_queue import try_dispatch_queued_builds
+
+            try_dispatch_queued_builds()
         except Exception:
             pass
     return HttpResponse("")
@@ -1644,6 +1739,12 @@ def save_custom_client(request):
                 )
                 if not defer_completion:
                     maybe_notify_build_success(run.pk)
+                    try:
+                        from .build_queue import try_dispatch_queued_builds
+
+                        try_dispatch_queued_builds()
+                    except Exception:
+                        pass
         return HttpResponse("File saved successfully!")
     finally:
         if temp_path is not None:
@@ -1722,6 +1823,12 @@ def finalize_custom_client(request):
         artifact_file_count__lt=artifact_file_count,
     ).update(artifact_file_count=artifact_file_count)
     maybe_notify_build_success(run.pk)
+    try:
+        from .build_queue import try_dispatch_queued_builds
+
+        try_dispatch_queued_builds()
+    except Exception:
+        pass
     return JsonResponse({"status": "success", "files": expected_files})
 
 
@@ -1782,6 +1889,12 @@ def _commit_downloaded_artifact(run, filename, file_path, size, content_hash, *,
             )
             if not defer_completion:
                 maybe_notify_build_success(run.pk)
+                try:
+                    from .build_queue import try_dispatch_queued_builds
+
+                    try_dispatch_queued_builds()
+                except Exception:
+                    pass
     return None
 
 
