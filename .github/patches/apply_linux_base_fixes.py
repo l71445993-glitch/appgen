@@ -40,7 +40,9 @@ def main() -> None:
     patches = args.patches.resolve()
     version = source_version()
 
-    if version == "1.4.9":
+    if version == "1.5.0":
+        apply(patches / "rustdesk_default_linux_150.diff")
+    elif version == "1.4.9":
         apply(patches / "rustdesk_default_linux_149.diff")
     else:
         legacy = patches / "rustdesk_default_linux.diff"

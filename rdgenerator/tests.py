@@ -822,7 +822,9 @@ class GeneratorFeaturePayloadTests(TestCase):
 
     def test_default_version_is_1_5_0(self):
         self.assertEqual(GenerateForm().fields["version"].initial, "1.5.0")
-        self.assertIn(("1.5.0", "1.5.0"), GenerateForm().fields["version"].choices)
+        choice_values = [value for value, _label in GenerateForm().fields["version"].choices]
+        self.assertIn("1.5.0", choice_values)
+        self.assertEqual(dict(GenerateForm().fields["version"].choices)["1.5.0"], "1.5.0")
 
     def test_smart_multi_relay_missing_input_defaults_false_and_is_serialized(self):
         data = self._feature_payload()
@@ -844,15 +846,25 @@ class GeneratorFeaturePayloadTests(TestCase):
                 self.assertTrue(form.is_valid(), form.errors)
                 self.assertTrue(form.cleaned_data["smartMultiRelay"])
 
+    def test_smart_multi_relay_accepts_1_5_0(self):
+        form = GenerateForm(data=self._smart_multi_relay_payload(version="1.5.0"))
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_beijing_linux_accepts_1_5_0(self):
+        data = self._feature_payload(platform="linux")
+        data["version"] = "1.5.0"
+        form = GenerateForm(data=data)
+        self.assertTrue(form.is_valid(), form.errors)
+
     def test_smart_multi_relay_rejects_nightly_and_other_versions(self):
-        for version in ("master", "1.4.8", "1.5.0"):
+        for version in ("master", "1.4.8", "1.4.7"):
             with self.subTest(version=version):
                 form = GenerateForm(
                     data=self._smart_multi_relay_payload(version=version)
                 )
                 self.assertFalse(form.is_valid())
                 self.assertIn("smartMultiRelay", form.errors)
-                self.assertIn("仅支持 RustDesk 1.4.9", form.errors["smartMultiRelay"][0])
+                self.assertIn("仅支持 RustDesk 1.4.9 和 1.5.0", form.errors["smartMultiRelay"][0])
 
     def test_smart_multi_relay_rejects_macos(self):
         form = GenerateForm(data=self._smart_multi_relay_payload("macos"))

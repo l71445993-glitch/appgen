@@ -49,6 +49,16 @@ class SmartMultiRelayWorkflowTests(unittest.TestCase):
         self.assertIn("configured_api_server_for_websocket", hbb_patch)
         self.assertIn("hard_api_server_is_used_when_config_api_is_empty", hbb_patch)
 
+        root_150 = (
+            Path(__file__).resolve().parent / "smart_multi_relay_150_root.diff"
+        ).read_text(encoding="utf-8")
+        self.assertIn("unawaited(bind.mainCheckConnectStatus());", root_150)
+        self.assertIn("secure_tcp_required", root_150)
+        hbb_150 = (
+            Path(__file__).resolve().parent / "smart_multi_relay_150_hbb_common.diff"
+        ).read_text(encoding="utf-8")
+        self.assertIn("configured_api_server_for_websocket", hbb_150)
+
     def test_supported_workflows_apply_only_the_locked_true_path(self):
         for workflow_name, (stage_name, first_following_step) in SMART_WORKFLOWS.items():
             with self.subTest(workflow=workflow_name):
@@ -59,7 +69,7 @@ class SmartMultiRelayWorkflowTests(unittest.TestCase):
                 if stage_name == "Stage smart multi-relay patch bundle":
                     self.assertIn("env.smartMultiRelay == 'true'", stage)
                 self.assertIn("env.smartMultiRelay == 'true'", apply)
-                self.assertIn("apply_smart_multi_relay_149.py", apply)
+                self.assertIn("apply_smart_multi_relay.py", apply)
                 self.assertIn("--enabled true", apply)
                 self.assertIn("--source .", apply)
                 self.assertIn("--patches", apply)
@@ -91,15 +101,20 @@ class SmartMultiRelayWorkflowTests(unittest.TestCase):
     def test_smart_patch_bundle_is_complete_and_macos_is_excluded(self):
         patches = Path(__file__).resolve().parent
         for name in (
+            "apply_smart_multi_relay.py",
             "apply_smart_multi_relay_149.py",
+            "apply_smart_multi_relay_150.py",
             "smart_multi_relay_149_root.diff",
             "smart_multi_relay_149_hbb_common.diff",
+            "smart_multi_relay_150_root.diff",
+            "smart_multi_relay_150_hbb_common.diff",
         ):
             self.assertTrue((patches / name).is_file(), name)
 
         macos = (WORKFLOW_DIR / "generator-macos.yml").read_text(encoding="utf-8")
         self.assertNotIn("smartMultiRelay", macos)
         self.assertNotIn("apply_smart_multi_relay_149.py", macos)
+        self.assertNotIn("apply_smart_multi_relay.py", macos)
 
     def test_release_validation_uses_private_actions_artifacts(self):
         fetch = (WORKFLOW_DIR / "fetch-encrypted-secrets.yml").read_text(

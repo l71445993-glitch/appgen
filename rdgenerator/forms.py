@@ -865,9 +865,9 @@ WINDOWS_RESERVED_NAME = re.compile(
     re.IGNORECASE,
 )
 MAX_BUILD_NAME_UTF8_BYTES = 200
-BEIJING_LINUX_VERSIONS = {"1.4.7", "1.4.8", "1.4.9"}
+BEIJING_LINUX_VERSIONS = {"1.4.7", "1.4.8", "1.4.9", "1.5.0"}
 SILENT_AGENT_VERSIONS = {"1.4.9", "1.5.0"}
-SMART_MULTI_RELAY_VERSIONS = {"1.4.9"}
+SMART_MULTI_RELAY_VERSIONS = {"1.4.9", "1.5.0"}
 FORM_SCHEMA_VERSION = "2"
 SMART_MULTI_RELAY_PLATFORMS = {'windows', 'windows-x86', 'linux', 'android'}
 SMART_RENDEZVOUS_DOMAIN = re.compile(
@@ -974,9 +974,29 @@ class GenerateForm(forms.Form):
         ('ios', 'iOS（未签名 IPA）'),
     ], initial='windows')
     version = forms.ChoiceField(
-        choices=[('master','nightly'),('1.5.0','1.5.0'),('1.4.9','1.4.9'),('1.4.8','1.4.8'),('1.4.7','1.4.7'),('1.4.6','1.4.6'),('1.4.5','1.4.5'),('1.4.4','1.4.4'),('1.4.3','1.4.3'),('1.4.2','1.4.2'),('1.4.1','1.4.1'),('1.4.0','1.4.0'),('1.3.9','1.3.9'),('1.3.8','1.3.8'),('1.3.7','1.3.7'),('1.3.6','1.3.6'),('1.3.5','1.3.5'),('1.3.4','1.3.4'),('1.3.3','1.3.3')],
+        choices=[
+            ('master', 'nightly'),
+            ('1.5.0', '1.5.0'),
+            ('1.4.9', '1.4.9'),
+            ('1.4.8', '1.4.8'),
+            ('1.4.7', '1.4.7'),
+            ('1.4.6', '1.4.6'),
+            ('1.4.5', '1.4.5'),
+            ('1.4.4', '1.4.4'),
+            ('1.4.3', '1.4.3'),
+            ('1.4.2', '1.4.2'),
+            ('1.4.1', '1.4.1'),
+            ('1.4.0', '1.4.0'),
+            ('1.3.9', '1.3.9'),
+            ('1.3.8', '1.3.8'),
+            ('1.3.7', '1.3.7'),
+            ('1.3.6', '1.3.6'),
+            ('1.3.5', '1.3.5'),
+            ('1.3.4', '1.3.4'),
+            ('1.3.3', '1.3.3'),
+        ],
         initial='1.5.0',
-        help_text="nightly 是开发版，功能更新但稳定性可能较低"
+        help_text="点右侧 ⓘ 可查看该版本官方更新摘要；nightly 为开发版，稳定性较低"
     )
     delayFix = forms.BooleanField(initial=True, required=False)
     beijingCustom = forms.BooleanField(label="北京 Linux 定制", initial=False, required=False)
@@ -1385,7 +1405,7 @@ class GenerateForm(forms.Form):
             if version not in SMART_MULTI_RELAY_VERSIONS:
                 self.add_error(
                     'smartMultiRelay',
-                    '智能多中继当前仅支持 RustDesk 1.4.9（补丁锁定）；1.5.0 及其他版本暂不支持。',
+                    '智能多中继当前仅支持 RustDesk 1.4.9 和 1.5.0（补丁锁定）。',
                 )
             if platform not in SMART_MULTI_RELAY_PLATFORMS:
                 self.add_error(
@@ -1456,7 +1476,7 @@ class GenerateForm(forms.Form):
             if version not in BEIJING_LINUX_VERSIONS:
                 self.add_error(
                     'beijingCustom',
-                    '北京 Linux 定制仅支持已验证的 RustDesk 1.4.7、1.4.8 和 1.4.9。',
+                    '北京 Linux 定制仅支持已验证的 RustDesk 1.4.7、1.4.8、1.4.9 和 1.5.0。',
                 )
             if len(cleaned.get('exename') or '') < 2:
                 self.add_error(

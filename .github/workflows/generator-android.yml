@@ -199,7 +199,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 "$RUNNER_TEMP/rdgen-patches/apply_smart_multi_relay_149.py" \
+          python3 "$RUNNER_TEMP/rdgen-patches/apply_smart_multi_relay.py" \
             --enabled true \
             --source . \
             --patches "$RUNNER_TEMP/rdgen-patches"

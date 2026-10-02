@@ -848,6 +848,19 @@
         .field-label-row .feature-help-btn {
             margin-left: 2px;
         }
+        .version-field-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .version-field-row select {
+            flex: 1 1 auto;
+            min-width: 0;
+            margin: 0;
+        }
+        .version-field-row .feature-help-btn {
+            flex: 0 0 auto;
+        }
         .delivery-card__title {
             display: inline-flex;
             align-items: center;
@@ -1853,8 +1866,13 @@
                             <div class="field-grid">
                                 <div class="field-block">
                                     <label for="{{ form.version.id_for_label }}">RustDesk 版本</label>
-                                    {{ form.version }}
-                                    {% if form.version.help_text %}<span class="help-text">{{ form.version.help_text }}</span>{% endif %}
+                                    <div class="version-field-row">
+                                        {{ form.version }}
+                                        <button type="button" id="versionNotesBtn" class="feature-help-btn" title="查看该版本官方更新内容" aria-label="查看该版本官方更新内容">
+                                            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                                        </button>
+                                    </div>
+                                    <span class="help-text">点右侧 ⓘ 查看当前所选版本的官方更新摘要。</span>
                                 </div>
                                 <div class="field-block">
                                     <span class="field-label">附加选项</span>
@@ -1871,7 +1889,7 @@
                             </div>
                             <div id="smartMultiRelayNotice" class="capability-note" hidden>
                                 <i class="fas fa-shield-alt" aria-hidden="true"></i>
-                                <span>要求 RustDesk 1.4.9、域名形式的 hbbs、受信任证书和 HTTPS API；构建会强制 WSS 并禁用不安全 TLS 回退。1.5.0 暂未开放此选项。</span>
+                                <span>要求 RustDesk 1.4.9 / 1.5.0、域名形式的 hbbs、受信任证书和 HTTPS API；构建会强制 WSS 并禁用不安全 TLS 回退。</span>
                             </div>
                         </div>
                     </div>
@@ -2367,9 +2385,9 @@
         const flutterDesktopPlatforms = new Set(['windows', 'linux', 'macos']);
         const compactLayoutPlatforms = new Set(['windows', 'linux', 'macos']);
         const windowsPlatforms = new Set(['windows', 'windows-x86']);
-        const beijingLinuxVersions = new Set(['1.4.7', '1.4.8', '1.4.9']);
+        const beijingLinuxVersions = new Set(['1.4.7', '1.4.8', '1.4.9', '1.5.0']);
         const silentAgentVersions = new Set(['1.4.9', '1.5.0']);
-        const smartMultiRelayVersions = new Set(['1.4.9']);
+        const smartMultiRelayVersions = new Set(['1.4.9', '1.5.0']);
         const beijingCustomOption = document.getElementById('beijingCustomOption');
         const beijingCustomToggle = document.getElementById("{{ form.beijingCustom.id_for_label }}");
         const smartMultiRelayOption = document.getElementById('smartMultiRelayOption');
@@ -3002,7 +3020,7 @@
             }
             if (smartMultiRelayInput?.checked) {
                 if (!smartMultiRelayVersions.has(versionSelect?.value)) {
-                    push('smartMultiRelay', '智能多中继：当前仅支持 RustDesk 1.4.9。');
+                    push('smartMultiRelay', '智能多中继：当前仅支持 RustDesk 1.4.9 和 1.5.0。');
                 }
                 if (!(document.getElementById("{{ form.serverIP.id_for_label }}")?.value || '').trim()) {
                     push('serverIP', 'ID 服务器：智能多中继时必须填写 hbbs 域名。');
@@ -3450,7 +3468,7 @@
             },
             platform_linux: {
                 title: 'Linux 桌面端',
-                body: '生成 Linux 桌面客户端。\n\n标准 Linux 包默认只吃「配置名称」；若要改服务器、品牌、权限等，请开启「北京 Linux 定制」（仅 1.4.7/1.4.8/1.4.9）。',
+                body: '生成 Linux 桌面客户端。\n\n标准 Linux 包默认只吃「配置名称」；若要改服务器、品牌、权限等，请开启「北京 Linux 定制」（1.4.7/1.4.8/1.4.9/1.5.0）。',
             },
             platform_android: {
                 title: 'Android',
@@ -3466,7 +3484,7 @@
             },
             version: {
                 title: 'RustDesk 版本',
-                body: '决定基于哪一版 RustDesk 源码打自定义包。\n\n• 1.5.0：当前默认稳定版（静默代理可用）\n• 1.4.9：智能多中继补丁锁定版；北京 Linux 定制可用\n• 1.4.8 / 1.4.7：北京 Linux 定制可用\n• 更低版本：部分增强开关会灰掉\n• nightly：尝鲜，稳定性自担\n\n选版本前先确认目标功能是否要求最低版本。',
+                body: '点版本选择框右侧的 ⓘ，可查看当前所选版本的官方更新摘要。\n\n智能多中继与静默代理均支持 1.4.9 / 1.5.0；北京 Linux 定制支持 1.4.7–1.4.9 / 1.5.0。',
             },
             delayFix: {
                 title: '修复第三方 API 连接延迟',
@@ -3474,11 +3492,11 @@
             },
             beijingCustom: {
                 title: '北京 Linux 定制',
-                body: '标准 Linux 构建几乎只应用「配置名称」。打开本项后，Linux 才会完整应用服务器、品牌、权限、桌面行为等定制。\n\n仅支持已验证的 1.4.7 / 1.4.8 / 1.4.9。包名至少 2 个字符；部分元数据不能含百分号。',
+                body: '标准 Linux 构建几乎只应用「配置名称」。打开本项后，Linux 才会完整应用服务器、品牌、权限、桌面行为等定制。\n\n仅支持已验证的 1.4.7 / 1.4.8 / 1.4.9 / 1.5.0。包名至少 2 个字符；部分元数据不能含百分号。',
             },
             smartMultiRelay: {
                 title: '智能多中继（严格 WSS）',
-                body: '由服务器按策略下发/选择中继，并强制走安全的 WSS，禁用不安全 TLS 回退。\n\n硬性要求：\n• RustDesk 1.4.9（补丁锁定，1.5.0 暂不支持）\n• hbbs 必须是域名（不能裸 IP）\n• API 必须是 https://\n• 填写服务器公钥 Key\n• 不能与「固定中继」同时开\n\n适合已有域名证书、要多中继调度的生产环境。',
+                body: '由服务器按策略下发/选择中继，并强制走安全的 WSS，禁用不安全 TLS 回退。\n\n硬性要求：\n• RustDesk 1.4.9 或 1.5.0（补丁锁定）\n• hbbs 必须是域名（不能裸 IP）\n• API 必须是 https://\n• 填写服务器公钥 Key\n• 不能与「固定中继」同时开\n\n适合已有域名证书、要多中继调度的生产环境。',
             },
             direction: {
                 title: '连接类型',
@@ -3703,7 +3721,8 @@
                 const forId = label.getAttribute('for');
                 const control = forId ? document.getElementById(forId) : null;
                 const name = control?.name;
-                if (!name || !FEATURE_HELP[name]) return;
+                // Version has a dedicated notes button beside the select.
+                if (!name || name === 'version' || !FEATURE_HELP[name]) return;
                 attachFeatureHelpButton(label, name, FEATURE_HELP[name].title);
             });
             // Platform icons
@@ -3719,6 +3738,121 @@
                 attachFeatureHelpButton(deliveryTitle, 'download_access', FEATURE_HELP.download_access.title);
             }
         }
+
+        const VERSION_NOTES = {
+            master: {
+                title: 'nightly 更新说明',
+                body: '每日开发版，包含尚未正式发版的最新改动。\n\n功能最新，但稳定性与兼容性不保证，生产投放请优先用正式版本。',
+            },
+            '1.5.0': {
+                title: '1.5.0 官方更新',
+                body: '主要新增：\n• WebRTC\n• ID 白名单\n• HDR tonemap\n• 可选：已连接会话间同步剪贴板\n• macOS 静默自动更新\n• 录制可见性/存储选项、移动端画布锁定等\n\n说明：本站「智能多中继」与「北京 Linux 定制」已支持此版。',
+            },
+            '1.4.9': {
+                title: '1.4.9 官方更新',
+                body: '主要新增：\n• 审计日志支持控制器用户归属\n• 自动重连时恢复上次查看的显示器\n• 终端退出时自动关闭标签/窗口\n• 连接审计补充认证细节\n\n说明：本站「智能多中继」补丁锁定此版本。',
+            },
+            '1.4.8': {
+                title: '1.4.8 官方更新',
+                body: '主要新增：\n• Windows ARM64 支持\n• 远程工具栏显示器切换按钮\n• 隐私模式多显示器相关改进\n• 在线状态自动补全等',
+            },
+            '1.4.7': {
+                title: '1.4.7 官方更新',
+                body: '主要新增：\n• Android 设备部署流程\n• 工具栏可拖拽并吸附到会话窗口四边\n• 自定义客户端禁用设置时仍允许部分 CLI 配置等',
+            },
+            '1.4.6': {
+                title: '1.4.6 官方更新',
+                body: '主要新增：\n• 头像\n• Windows 自定义客户端自动更新\n• 显示名相关改进等',
+            },
+            '1.4.5': {
+                title: '1.4.5 官方更新',
+                body: '主要新增：\n• 可为不同用户配置远程控制权限\n• 相对鼠标模式\n• 移动端终端浮动快捷键等',
+            },
+            '1.4.4': {
+                title: '1.4.4 官方更新',
+                body: '主要新增：\n• Wayland 多缩放显示器支持（GNOME/KDE）\n• 边缘滚动\n• 结束连接时可填写备注\n• iOS 传输文件可由 Files / iTunes 管理等',
+            },
+            '1.4.3': {
+                title: '1.4.3 官方更新',
+                body: '主要新增：\n• 移动端虚拟鼠标\n• 自定义缩放模式\n• Wayland 多屏采集\n• 更多 CLI / 设备分配能力等',
+            },
+            '1.4.2': {
+                title: '1.4.2 官方更新',
+                body: '主要新增：\n• 观看模式在被控侧显示本机光标\n• 增量文件传输（两端均需 ≥1.4.2）\n• 状态提示显示 TCP/UDP/IPv6 等',
+            },
+            '1.4.1': {
+                title: '1.4.1 官方更新',
+                body: '主要新增：\n• 终端\n• UDP / IPv6 Punch\n• 数位笔\n• 数字一次性密码选项等',
+            },
+            '1.4.0': {
+                title: '1.4.0 官方更新',
+                body: '主要新增：\n• 锁屏登录密码\n• 截图\n• Pro 可用主机名作 ID\n• Windows 自动更新；Windows/Mac 手动更新等',
+            },
+            '1.3.9': {
+                title: '1.3.9 官方更新',
+                body: '主要新增：\n• 远程打印机（当时主要为 Windows→Windows）\n• 查看摄像头\n• 复制文件到 macOS\n• Citrix 会话支持等',
+            },
+            '1.3.8': {
+                title: '1.3.8 官方更新',
+                body: '主要新增：\n• 跨平台文件复制粘贴（当时复制到 macOS 尚未完备）\n• 设备组等',
+            },
+            '1.3.7': {
+                title: '1.3.7 官方更新',
+                body: '主要变化：\n• 新 QoS\n• macOS 为 --service 使用独立可执行文件，缓解“应用无法再打开”问题\n• 多项稳定性修复',
+            },
+            '1.3.6': {
+                title: '1.3.6 官方更新',
+                body: '主要改进：\n• 改进 macOS 键盘翻译模式',
+            },
+            '1.3.5': {
+                title: '1.3.5 官方更新',
+                body: '紧急修复向：\n• openSUSE Leap 主窗口不显示等问题\n• 旧版 macOS 因符号缺失无法启动等问题',
+            },
+            '1.3.4': {
+                title: '1.3.4 官方更新',
+                body: '主要新增：\n• 移动端按键帮助扩展（更多按键）',
+            },
+            '1.3.3': {
+                title: '1.3.3 官方更新',
+                body: '主要新增/修复：\n• 移动剪贴板支持\n• Mac ARM 系统声音等多项改进',
+            },
+        };
+
+        function showSelectedVersionNotes() {
+            const key = versionSelect?.value || '1.5.0';
+            const entry = VERSION_NOTES[key] || {
+                title: `${key} 更新说明`,
+                body: '暂无整理该版本的官方更新摘要。',
+            };
+            const overlay = document.getElementById('featureHelpOverlay');
+            const titleEl = document.getElementById('featureHelpTitle');
+            const bodyEl = document.getElementById('featureHelpBody');
+            const dismiss = document.getElementById('featureHelpDismiss');
+            if (!overlay || !titleEl || !bodyEl) {
+                alert(`${entry.title}\n\n${entry.body}`);
+                return;
+            }
+            titleEl.textContent = entry.title;
+            bodyEl.textContent = entry.body;
+            overlay.hidden = false;
+            const close = () => {
+                overlay.hidden = true;
+                dismiss?.removeEventListener('click', close);
+                overlay.removeEventListener('click', onBackdrop);
+            };
+            const onBackdrop = (event) => {
+                if (event.target === overlay) close();
+            };
+            dismiss?.addEventListener('click', close);
+            overlay.addEventListener('click', onBackdrop);
+            dismiss?.focus({ preventScroll: true });
+        }
+
+        document.getElementById('versionNotesBtn')?.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            showSelectedVersionNotes();
+        });
 
         installFeatureHelpButtons();
 

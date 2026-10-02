@@ -103,9 +103,13 @@ jobs:
           $bundle = Join-Path $env:RUNNER_TEMP 'rdgen-smart-multi-relay'
           New-Item -ItemType Directory -Path $bundle -Force | Out-Null
           foreach ($name in @(
+            'apply_smart_multi_relay.py',
             'apply_smart_multi_relay_149.py',
+            'apply_smart_multi_relay_150.py',
             'smart_multi_relay_149_root.diff',
-            'smart_multi_relay_149_hbb_common.diff'
+            'smart_multi_relay_149_hbb_common.diff',
+            'smart_multi_relay_150_root.diff',
+            'smart_multi_relay_150_hbb_common.diff'
           )) {
             Copy-Item -LiteralPath (Join-Path '.github\patches' $name) -Destination $bundle -Force
           }
@@ -157,7 +161,7 @@ jobs:
         shell: pwsh
         run: |
           $bundle = Join-Path $env:RUNNER_TEMP 'rdgen-smart-multi-relay'
-          python (Join-Path $bundle 'apply_smart_multi_relay_149.py') --enabled true --source . --patches $bundle
+          python (Join-Path $bundle 'apply_smart_multi_relay.py') --enabled true --source . --patches $bundle
 
       - name: Restore bridge files
         uses: actions/download-artifact@master

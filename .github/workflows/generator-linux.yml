@@ -103,9 +103,13 @@ jobs:
           rm -rf "$bundle"
           install -d "$bundle"
           cp \
+            .github/patches/apply_smart_multi_relay.py \
             .github/patches/apply_smart_multi_relay_149.py \
+            .github/patches/apply_smart_multi_relay_150.py \
             .github/patches/smart_multi_relay_149_root.diff \
             .github/patches/smart_multi_relay_149_hbb_common.diff \
+            .github/patches/smart_multi_relay_150_root.diff \
+            .github/patches/smart_multi_relay_150_hbb_common.diff \
             "$bundle/"
 
       - name: Export GitHub Actions cache environment variables
@@ -162,7 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           bundle="$RUNNER_TEMP/rdgen-smart-multi-relay"
-          python3 "$bundle/apply_smart_multi_relay_149.py" \
+          python3 "$bundle/apply_smart_multi_relay.py" \
             --enabled true \
             --source . \
             --patches "$bundle"
@@ -218,6 +222,7 @@ jobs:
               apply_linux_base_fixes.py \
               rustdesk_default_linux.diff \
               rustdesk_default_linux_149.diff \
+              rustdesk_default_linux_150.diff \
               beijing_linux_147_compat.py \
               mrkj_legacy_uinput_keyboard.diff \
               mrkj_linux_fast_service.py \
