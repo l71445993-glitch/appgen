@@ -6,7 +6,7 @@ on:
       version:
         description: 'version to buld'
         required: true
-        default: '1.4.9'
+        default: '1.5.0'
         type: string
       zip_url:
         description: 'url to zip of json'
@@ -33,7 +33,7 @@ env:
   FLUTTER_ELINUX_VERSION: "3.16.9"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   # vcpkg version: 2024.07.12
-  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
   ARMV7_VCPKG_COMMIT_ID: "6f29f12e82a8293156836ad81cc9bf5af41fe836"
   VERSION: "${{ inputs.version }}"
   NDK_VERSION: "r28c"
